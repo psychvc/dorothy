@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+function ensure_dorothy_configured() {
+              DOROTHY="$HOME/.local/share/dorothy"
+              PATH="$DOROTHY/commands:$PATH"
+
+              source $DOROTHY/sources/bash.bash
+              source $DOROTHY/sources/styles.bash                
+              option_branch=('--branch main')
+     local clone_args=(
+				'--quiet'   # --quiet to suppress 'Cloning into...' feedback
+				'--no-tags' # don't do `--depth 1` and `--single-branch` as a full history is required to do any checkouts
+			)
+			if [[ -n $option_branch ]]; then
+				clone_args+=(
+					'--branch'
+					"$option_branch"
+				)
+			fi
+			__eval_wrap -- git clone "${clone_args[@]}" "$the_upstream_git_https" "$DOROTHY"
+
+			# setup repo with reference
+			(
+				cd "$DOROTHY"
+				__eval_wrap -- git config core.autocrlf input || return $?
+				__eval_wrap -- git add --renormalize . || return $?
+				__eval_wrap -- git checkout --quiet "$option_reference" # --quiet to suppress "detached HEAD" feedback
+			)
+  
+    if __command_exists -- git-helper; then
+				__print_style --h2="Syncing the Dorothy installation at $DOROTHY" || return $?
+				# verify, so we don't have to do it via `--verify` later
+				git-helper verify --path="$DOROTHY" || return $?
+				# sync with its configured remote first (their upstream)
+				git-helper sync --rebase --depth="$option_depth" --path="$DOROTHY" || return $?
+				# sync with our intended remote second (the upstream)
+				git-helper sync --rebase --depth="$option_depth" --path="$DOROTHY" --remote="$the_upstream_remote" --url="$the_upstream_git_https" || return $?
+				__print_style --g2="Syncing the Dorothy installation at $DOROTHY" || return $?
+			else
+				return 1
+			fi
+
+   	__update_modern_dorothy || __return $? -- __print_error 'Dorothy was unable to be automatically updated. Update Dorothy manually then try again.' || return $?
+     	if [[ ! -d $DOROTHY ]]; then
+			install_dorothy
+			source "$DOROTHY/sources/environment.sh"
+		elif [[ $action =~ ^(update|install)$ ]]; then
+			if [[ ${DOROTHY_ENVIRONMENT-} != 'yes' ]]; then
+				source "$DOROTHY/sources/environment.sh"
+			fi
+			update_dorothy
+			source "$DOROTHY/sources/environment.sh"
+		elif [[ ${DOROTHY_ENVIRONMENT-} != 'yes' ]]; then
+			source "$DOROTHY/sources/environment.sh"
+		fi
+        
+   
+    local hostname
+		hostname="$(get-hostname)"
+		if [[ $IS_STDIN_OPENED_ON_TERMINAL == 'yes' ]] && is-generic -- "$hostname"; then
+			if confirm --bool --ppid=$$ -- "This machine's hostname is currently generic [$hostname], would you like to change it?"; then
+				hostname="$(
+					ask --linger --question='What should the new hostname be?'
+				)"
+				if [[ -n $hostname ]]; then
+					set-hostname "$hostname"
+				else
+					__print_lines "Proceeding with the existing hostname: $hostname"
+				fi
+			fi
+		fi
+ 
+}
+
+ensure_dorothy_configured "$@"

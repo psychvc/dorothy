@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+                
+# =====================================
+# IMPORTANT NOTES
+
+# Don't use `is-admin` here, as sudo does not necessarily load this, as such sudo should inherit standard config.
+
+# =====================================
+# Requisites        
+
+# DOROTHY for sourcing
+export DOROTHY
+if [[ -z ${DOROTHY-} ]]; then
+        self="${BASH_SOURCE:-"$0"}"
+        DOROTHY="${self%/commands/setup-environment-commands*}"
+fi
+                
+# sources
+source "$DOROTHY/sources/bash.bash"
+source "$DOROTHY/sources/config.sh"

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+function ensure_minimal_dependencies() {
+
+              DOROTHY="$HOME/.local/share/dorothy"
+              PATH="$DOROTHY/commands:$PATH"
+
+              source $DOROTHY/sources/bash.bash
+              source $DOROTHY/sources/styles.bash                
+		# dorothy has been installed
+		__print_style --h2='Ensure required dependencies'
+
+		# macos tooling
+		if __is_macos; then
+			setup-util-apple-rosetta --quiet
+			setup-util-apple-cli-tools --quiet
+			# environment invalidation and reloading now happens automatically via signals
+		fi
+
+		# upgrade bash if necessary
+		setup-util-bash --quiet
+
+		# `github-download` sometimes requires `jq`
+		# `get-github-release` sometimes requires `gsed` however it allows fallback to `sed`
+		# `config-helper` uses `echo-regexp` which requires `deno]
+		if __command_missing -- jq deno; then
+			if __command_exists -- apt-get; then
+				__elevate apt-get -qq update # -qq: quiet
+			fi
+			setup-util-jq --quiet
+			setup-util-deno --quiet
+		fi
+
+		# ensure nushell always has the config files it needs
+		if __command_exists -- nu; then
+			setup-util-nu --quiet
+		fi
+
+		# log
+		__print_style --g2='Ensure required dependencies'
+}
+
+ensure_minimal_dependencies "$@"

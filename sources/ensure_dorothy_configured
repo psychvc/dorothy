@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+function ensure_dorothy_configured() {
+              DOROTHY="$HOME/.local/share/dorothy"
+              PATH="$DOROTHY/commands:$PATH"
+
+              source $DOROTHY/sources/bash.bash
+              source $DOROTHY/sources/styles.bash                
+              the_upstream_git_https="git@github.com:bevry/dorothy.git"              
+              option_reference='dev/raspi-bugfixes''       
+              option_reference="$option_branch"
+              clone_arg+=('--quiet')
+              clone_args+=('--branch $option_branch')
+	      option_depth='no'
+
+        function __eval_wrap {
+		# trim -- prefix
+		if [[ ${1-} == '--' ]]; then
+			shift
+		fi
+		# proceed
+		printf '%s\n' "$*"
+		"$@" # eval
+	}
+
+    function install_dorothy {
+			__print_lines "Installing Dorothy into $DOROTHY from $the_browse_url"
+
+			# setup repo with branch
+			local clone_args=(
+				'--quiet'   
+				'--no-tags' 
+			)
+			if [[ -n $option_branch ]]; then
+				clone_args+=(
+					'--branch'
+					"$option_branch"
+				)
+			fi
+                         
+                         if [ -z $DOROTHY ]; then
+			      __eval_wrap -- git clone "${clone_args[@]}" "$the_upstream_git_https" "$DOROTHY"
+                        fi
+              
+			# setup repo with reference
+			
+				cd "$DOROTHY"
+				__eval_wrap -- git config core.autocrlf input || return $?
+				__eval_wrap -- git add --renormalize . || return $?
+				__eval_wrap -- git checkout --quiet "$option_reference" # --quiet to suppress "detached HEAD" feedback
+			
+		}
+
+
+		function __update_modern_dorothy {
+			if __command_exists -- git-helper; then
+				__print_style --h2="Syncing the Dorothy installation at $DOROTHY" || return $?
+				git-helper verify --path="$DOROTHY" || return $?
+				git-helper sync --rebase --depth="$option_depth" --path="$DOROTHY" || return $?
+				# sync with our intended remote second (the upstream)
+				git-helper sync --rebase --depth="$option_depth" --path="$DOROTHY" --remote="$the_upstream_remote" --url="$the_upstream_git_https" || return $?
+				__print_style --g2="Syncing the Dorothy installation at $DOROTHY" || return $?
+			else
+				return 1
+			fi
+		}
+
+        function update_dorothy {
+			# https://github.com/bevry/dorothy/issues/215
+			__update_modern_dorothy 
+	}
+
+     	if [[ ! -d $DOROTHY ]]; then
+			install_dorothy
+			source "$DOROTHY/sources/environment.sh"
+		elif [[ ${DOROTHY_ENVIRONMENT-} != 'yes' ]]; then
+			source "$DOROTHY/sources/environment.sh"
+	 fi
+        
+   
+                local hostname
+		hostname="$(get-hostname)"
+			if confirm --bool --ppid=$$ -- "This machine's hostname is currently generic [$hostname], would you like to change it?"; then
+				hostname="$(
+					ask --linger --question='What should the new hostname be?'
+				)"
+				if [[ -n $hostname ]]; then
+					set-hostname "$hostname"
+				else
+					__print_lines "Proceeding with the existing hostname: $hostname"
+				fi
+            	fi		
+ 
+}
+

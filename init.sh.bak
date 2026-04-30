@@ -1,0 +1,70 @@
+#!/usr/bin/env sh
+# shellcheck disable=SC1072,SC1073
+
+function _safe_source() {
+  [[ -r "$1" ]] && [[ -f "$1" ]] && source "$1"
+}
+
+if [ -z "${HOME:-}" ]; then
+    export HOME=~
+fi
+
+_safe_source ~/.local/share/dorothy/init.sh
+
+for src in ~/.{config_dotfiles,path,exports,shellrc}; do
+      _safe_source "$src"
+done   
+unset src 
+
+if [ -n "${DOROTHY_LOAD-}" ]; then
+   DOROTHY_FORCE_LOAD=$DOROTHY_LOAD   
+else
+  DOROTHY_FORCE_LOAD='no'
+  if [ -z "${DOROTHY_LOADED_SHARED_SCOPE-}" ]; then
+   case $ in
+    "zsh")
+    if [[ -o login ]]; then
+       /bin/zsh -il  ~/.local/share/dorothy/init.sh
+       DOROTHY_LOADED_SHARED_SCOPE='yes'
+    fi
+     ;;
+   "-zsh")
+     if [[ -o login ]]; then
+       /bin/zsh -i  ~/.local/share/dorothy/init.sh
+       DOROTHY_LOADED_SHARED_SCOPE='yes'
+     fi
+     ;;
+    esac
+  else
+   case $- in *l*) DOROTHY_FORCE_LOAD='yes' ;; esac
+  fi    
+fi
+
+
+if [ "${DOROTHY_LOAD-}" = 'yes' ]; then
+	# non-exported scope, used to prevent case where bash_profile loads at login then bashrc loads on new terminal
+	DOROTHY_LOADED_SHARED_SCOPE='yes'
+	# exported scope, used to prevent our workaround for non-login-terminal-applications from loading dorothy in manual non-login bash invocations
+	export DOROTHY_LOADED_EXPORT_SCOPE
+	DOROTHY_LOADED_EXPORT_SCOPE='yes'
+
+	# this should be consistent with:
+	# $DOROTHY/init.fish
+	# $DOROTHY/init.sh
+	# $DOROTHY/commands/dorothy
+	if [ -z "${DOROTHY-}" ]; then
+		# https://stackoverflow.com/a/246128
+		# https://stackoverflow.com/a/14728194
+		# if true login shell on macos, then $0 is `-bash`, `-zsh`, `-dash`, etc.
+		export DOROTHY
+		# this should somewhat coincide with `prepare_dorothy` in `dorothy`
+		if [ -n "${XDG_DATA_HOME-}" ] && [ -d "$XDG_DATA_HOME/dorothy" ]; then
+			DOROTHY="$XDG_DATA_HOME/dorothy"
+		else
+			DOROTHY="$HOME/.local/share/dorothy"
+		fi
+	fi
+   _safe_source "$DOROTHY/user/sources/environment.sh"
+
+  case $- in *i*) . "$DOROTHY/user/sources/interactive.sh" ;; esac
+fi

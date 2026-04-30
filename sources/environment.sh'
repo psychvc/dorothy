@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+function _safe_source() {
+  [[ -r "$1" ]] && [[ -f "$1" ]] && source "$1"
+}
+
+source "$DOROTHY/sources/environment.sh"
+
