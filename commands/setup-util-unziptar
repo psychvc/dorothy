@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+
+# https://repology.org/project/xz-utils/versions
+# https://packages.debian.org/sid/amd64/xz-utils/filelist
+# /usr/bin/lzmainfo
+# /usr/bin/unxz
+# /usr/bin/xz
+# /usr/bin/xzcat
+# /usr/bin/xzcmp
+# /usr/bin/xzdiff
+# /usr/bin/xzegrep
+# /usr/bin/xzfgrep
+# /usr/bin/xzgrep
+# /usr/bin/xzless
+# /usr/bin/xzmore
+
+# https://repology.org/project/bzip2/versions
+# https://packages.debian.org/sid/amd64/bzip2/filelist
+# /bin/bunzip2
+# /bin/bzcat
+# /bin/bzcmp
+# /bin/bzdiff
+# /bin/bzegrep
+# /bin/bzexe
+# /bin/bzfgrep
+# /bin/bzgrep
+# /bin/bzip2
+# /bin/bzip2recover
+# /bin/bzless
+# /bin/bzmore
+
+# https://repology.org/project/tar/versions
+# https://packages.debian.org/sid/amd64/tar/filelist
+# /bin/tar
+# /usr/sbin/rmt-tar
+# /usr/sbin/tarcat
+
+# https://repology.org/project/gzip/versions
+# https://packages.debian.org/sid/amd64/gzip/filelist
+# /bin/gunzip
+# /bin/gzexe
+# /bin/gzip
+# /bin/uncompress
+# /bin/zcat
+# /bin/zcmp
+# /bin/zdiff
+# /bin/zegrep
+# /bin/zfgrep
+# /bin/zforce
+# /bin/zgrep
+# /bin/zless
+# /bin/zmore
+# /bin/znew
+
+# https://repology.org/project/unzip/versions
+# https://packages.debian.org/sid/amd64/unzip/filelist
+# /usr/bin/funzip
+# /usr/bin/unzip
+# /usr/bin/unzipsfx
+# /usr/bin/zipgrep
+# /usr/bin/zipinfo
+
+function setup_util_unziptar() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# xz, do this first, as the others may depend on this
+	local options=(
+		--cli='xz'
+		"$@"
+		APK='xz'       # ALPINE
+		APT='xz-utils' # UBUNTU
+		AUR='xz'       # ARCH
+		BREW='xz'
+		EMERGE='app-arch/xz-utils' # GENTOO
+		URPMI='xz'                 # MAGEIA
+		NIX='xz'
+		RPM='xz'    # FEDORA
+		XBPS='xz'   # VOID
+		ZYPPER='xz' # SUSE
+	)
+	setup-util "${options[@]}"
+
+	# bzip2
+	options=(
+		--cli='bzip2'
+		"$@"
+		APK='bzip2' # ALPINE
+		APT='bzip2' # UBUNTU
+		AUR='bzip2' # ARCH
+		BREW='bzip2'
+		EMERGE='app-arch/bzip2' # GENTOO
+		NIX='bzip2'
+		RPM='bzip2'    # FEDORA
+		XBPS='bzip2'   # VOID
+		ZYPPER='bzip2' # SUSE
+	)
+	setup-util "${options[@]}"
+
+	# tar
+	options=(
+		--cli='tar'
+		"$@"
+		APK='tar' # ALPINE
+		APT='tar' # UBUNTU
+		AUR='tar' # ARCH
+		BREW='gnu-tar'
+		EMERGE='app-arch/tar' # GENTOO
+		NIX='gnutar'
+		RPM='tar'    # FEDORA
+		XBPS='tar'   # VOID
+		ZYPPER='tar' # SUSE
+	)
+	setup-util "${options[@]}"
+
+	# gzip
+	options=(
+		--cli='gzip'
+		"$@"
+		APK='gzip' # ALPINE
+		APT='gzip' # UBUNTU
+		AUR='gzip' # ARCH
+		BREW='gzip'
+		EMERGE='app-arch/gzip' # GENTOO
+		NIX='gzip'
+		RPM='gzip'    # FEDORA
+		XBPS='gzip'   # VOID
+		ZYPPER='gzip' # SUSE
+	)
+	setup-util "${options[@]}"
+
+	# unzip
+	options=(
+		--cli='unzip'
+		"$@"
+		APK='unzip' # ALPINE
+		APT='unzip' # UBUNTU
+		AUR='unzip' # ARCH
+		BREW='unzip'
+		EMERGE='app-arch/unzip' # GENTOO
+		NIX='unzip'
+		RPM='unzip'    # FEDORA
+		XBPS='unzip'   # VOID
+		ZYPPER='unzip' # SUSE
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_unziptar "$@"
+fi

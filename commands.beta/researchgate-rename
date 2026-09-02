@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+function researchgate_rename() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Rename papers downloaded from Research Gate to be consistent.
+
+			USAGE:
+			researchgate-rename
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Dependencies
+
+	__command_required -- 'sd' || return $?
+	__command_required -- 'python' || return $?
+
+	# =====================================
+	# Action
+
+	local regex file id name year f nf np dir filename dup
+
+	regex='researchgate.net/publication/(\w+)'
+	for file in "$@"; do
+		id=''
+		name=''
+		year=''
+		f="$(mktemp)"
+		pdftotext -layout -eol unix "$file" "$f"
+		while read -r line; do
+			if [[ -z $id ]]; then
+				# find id
+				id="$(__print_lines "$line" | echo-regexp -on "$regex" '$1')"
+			elif [[ -z $name ]]; then
+				# trim possibly invalid chars from name
+				name="$(__print_lines "$line" | echo-trim-special --stdin)"
+			elif [[ -z $year ]]; then
+				year="$(__print_lines "$line" | echo-regexp -on '[^\d](\d\d\d\d)[^\d]' '$1')"
+			else
+				break
+			fi
+		done < <(grep --after-context=10 --extended-regexp --regexp="$regex" -- "$f" | grep --regexp='.')
+
+		# __print_lines "id=[$id] year=[$year]"
+		#url="https://www.researchgate.net/publication/$id"
+
+		if [[ -n $id && -n $name ]]; then
+			if [[ -n $year ]]; then
+				nf="$year - $name [$id].pdf"
+			else
+				nf="$name [$id].pdf"
+			fi
+			dir="$(dirname -- "$file")"
+			filename="$(basename -- "$file")"
+			np="$dir/$nf"
+			if [[ $file == "$np" ]]; then
+				cat <<-EOF
+					$filename
+					=> already named correctly
+				EOF
+			else
+				dup=1
+				while [[ -f $np ]]; do
+					if is-same - "$file" "$np"; then
+						rm -f -- "$file"
+						cat <<-EOF
+							$filename
+							=> duplicate, removed
+						EOF
+						np=''
+						break
+					fi
+					dup=$((dup + 1))
+					nf="${nf%.pdf*} [$dup].pdf"
+					np="$dir/$nf"
+				done
+				if [[ -n $np ]]; then
+					mv -- "$file" "$np"
+					cat <<-EOF
+						$filename
+						=> $nf
+					EOF
+				fi
+			fi
+		fi
+	done
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	researchgate_rename "$@"
+fi

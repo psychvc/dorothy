@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+# https://github.com/jqlang/jq
+
+# https://github.com/jqlang/jq/releases
+# jq-1.7rc1.tar.gz
+# jq-1.7rc1.zip
+# jq-linux-amd64
+# jq-linux-arm64
+# jq-linux-armel
+# jq-linux-armhf
+# jq-linux-i386
+# jq-linux-mips
+# jq-linux-mips64
+# jq-linux-mips64el
+# jq-linux-mips64r6
+# jq-linux-mips64r6el
+# jq-linux-mipsel
+# jq-linux-mipsr6
+# jq-linux-mipsr6el
+# jq-linux-powerpc
+# jq-linux-ppc64el
+# jq-linux-riscv64
+# jq-linux-s390x
+# jq-macos-amd64
+# jq-macos-arm64
+# jq-windows-amd64.exe
+# jq-windows-i386.exe
+
+# https://packages.debian.org/sid/amd64/jq/filelist
+# /usr/bin/jq
+
+# https://repology.org/project/jq/versions
+
+function setup_util_jq() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=jq "$@"; then
+		return 0
+	fi
+
+	# setup
+	local arch options=(
+		--cli='jq'
+		"$@"
+		APK='jq' # ALPINE
+		APT='jq' # UBUNTU
+		AUR='jq' # ARCH
+		BREW='jq'
+		BSD='jq'
+		CHOCO='jq'
+		EMERGE='app-misc/jq' # GENTOO
+		NIX='jq'
+		PORT='jq'
+		RPM='jq'   # FEDORA
+		URPMI='jq' # MAGEIA
+		WINGET='jq'
+		XBPS='jq'   # VOID
+		ZYPPER='jq' # SUSE
+	)
+	function get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='jqlang/jq' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(get_github_asset_url "$1")" || return $?
+		options+=(DOWNLOAD="$url")
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '-macos-arm64' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '-macos-amd64' || :
+		fi
+	elif is-linux; then
+		if [[ $arch == 'r64' ]]; then
+			__add_download_option '-linux-riscv64' || :
+		elif [[ $arch == 'a64' ]]; then
+			__add_download_option '-linux-arm64' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option '-linux-armhf' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '-linux-amd64' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '-linux-i386' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+	# wsl download method error: runs fine, however it handles encodings/line-endings incorrectly causing bad parsing outputs
+	#
+	# elif is-windows; then
+	# 	if [[ "$arch" = 'x64' ]]; then
+	# 		__add_download_option '-windows-amd64.exe' || :
+	# 	elif [[ "$arch" = 'x32' ]]; then
+	# 		__add_download_option '-windows-i386.exe' || :
+	# 	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_jq "$@"
+fi

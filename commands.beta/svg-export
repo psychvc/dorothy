@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# @todo merge into [convert-helper]
+function svg_export() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local formats=(
+		png
+		pdf
+		svg
+		eps
+		ps
+	)
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Convert SVGs into PNGs.
+
+			USAGE:
+			svg-export [...options] -- ...<input>
+
+			OPTIONS:
+			--dpi=<dpi>
+			    Set the display pixels per inch, e.g. [150].
+
+			--scale=<scale>
+			    Set the scale factor, e.g. [2] for 2x.
+
+			--background=<background-color>
+			    Set the background color, defaults to [white].
+			    To keep transparency, use [--background=].
+
+			--format=<$(__join --source={formats} --delimiter='|')>
+
+			EXAMPLE:
+			svg-export -- *.svg
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_inputs=() option_dpi='' option_scale='' option_background='white' option_format=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--dpi='*) option_dpi="${item#*=}" ;;
+		'--scale='*) option_scale="${item#*=}" ;;
+		'--background='* | '--bg='*) option_background="${item#*=}" ;;
+		'--format='*) option_format="${item#*=}" ;;
+		'--')
+			option_inputs+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# if no inputs, fail
+	if [[ ${#option_inputs[@]} -eq 0 ]]; then
+		help 'No <input>s provided.'
+	fi
+
+	# ensure correct format
+	option_format="$(
+		choose --required \
+			--question='Which format to export to?' \
+			--default="$option_format" -- "${formats[@]}"
+	)"
+
+	# =====================================
+	# Dependencies
+
+	setup-util --quiet --cli='cairosvg' \
+		UV='cairosvg'
+
+	# =====================================
+	# Act
+
+	# adjustments
+	local suffix='' args=(
+		--format "$option_format"
+	)
+	if [[ -n $option_scale ]]; then
+		suffix+=" [scale=$option_scale]"
+		args+=(--scale "$option_scale")
+	fi
+	if [[ -n $option_dpi ]]; then
+		suffix+=" [dpi=$option_dpi]"
+		args+=(--dpi "$option_dpi")
+	fi
+	if [[ -n $option_background ]]; then
+		suffix+=" [bg=$option_background]"
+		args+=(--background "$option_background")
+	fi
+	suffix+=".$option_format"
+
+	# convert
+	local input output prefix
+	for input in "${option_inputs[@]}"; do
+		prefix="$(fs-path --no-extensions -- "$input")"
+		output="$prefix$suffix"
+
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold="Converting " --code="$input" --bold=" to " --code="$output")" \
+			--success="$(__print_style --bold+green="Converted " --code="$input" --bold=" to " --code="$output")" \
+			--failure="$(__print_style --bold+red="Failed to convert " --code="$input" --bold=" to " --code="$output")" -- \
+			cairosvg "${args[@]}" --output "$output" "$input" || :
+
+		# svg2png doesn't work well
+		# https://github.com/domenic/svg2png
+		# svg2png --scale="$option_scale" "$input" "$output"
+	done
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	svg_export "$@"
+fi

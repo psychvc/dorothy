@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+function echo_if_command_exists() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Output the <input> if it is a command that exists.
+
+			USAGE:
+			echo-if-command-exists [...options] [--] ...<input>
+			echo-lines ...<input> | echo-if-command-exists [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-if-command-exists -- 'bash'
+
+			    bash
+			    # exit status: 0
+
+			echo-if-command-exists -- 'a-command-that-does-not-exist'
+
+			    # exit status: 1
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function on_line {
+		if __command_exists -- "$1"; then
+			__print_lines "$1"
+		else
+			return 1
+		fi
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_if_command_exists "$@"
+fi

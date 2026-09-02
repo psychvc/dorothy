@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+# https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
+# https://forum.manjaro.org/t/howto-reboot-turn-off-your-frozen-computer-reisub-reisuo/3855?u=balupton
+
+function setup_linux_recovery() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# assert compatibility
+	if ! is-linux; then
+		__print_style --stderr --notice="[$0] is only intended to be run on Linux systems, skipping."
+		return 0
+	fi
+	if is-windows; then
+		__print_style --stderr --notice="[$0] is not applicable on Windows, skipping."
+		return 0
+	fi
+	if is-alpine; then
+		__print_style --stderr --notice="[$0] is not applicable on Alpine, skipping."
+		return 0
+	fi
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Configure Linux with Recovery Hotkeys.
+
+			USAGE:
+			setup-linux-recovery
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	__print_style --h1='Update GRUB with Recovery Hotkeys'
+
+	config-helper --elevate --file='/etc/sysctl.d/99-sysctl.conf' -- \
+		--field='kernel.sysrq' --no-quote --value=1
+
+	if grub-helper; then
+		__print_lines '💁🏼‍♀️ If your Linux machine ever locks up, you can follow the instructions here to safely shutdown/reboot: 💁🏼‍♀️'
+		__print_style '    ' --url='https://forum.manjaro.org/t/3855?u=balupton'
+	else
+		__print_style --stderr --error='Failed to upgrade grub with the recovery options. Please send a PR to Dorothy to add support. Continuing...'
+	fi
+
+	__print_style --g1='Update GRUB with Recovery Hotkeys'
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_linux_recovery "$@"
+fi

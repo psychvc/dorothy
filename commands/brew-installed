@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+function brew_installed() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# compatibility
+	if ! is-brew; then
+		return 46 # EPFNOSUPPORT 46 Protocol family not supported
+	fi
+
+	# =====================================
+	# Arguments
+
+	function help {
+		__print_help "$@" <<-EOF || return $?
+			ABOUT:
+			Outputs the names of the homebrew installed items.
+
+			USAGE:
+			brew-installed [...options] -- [...<items>]
+
+			OPTIONS:
+			-- ...<item>
+			    If provided, only get details for these <item>s. Fail if one of them has not yet been installed.
+
+			--[no-]formula
+			    Output consider formulas. Formulas can be installed by request, or by dependency; use <requested> to filter.
+			--[no-]cask
+			    Output consider casks. All casks are only installed by request.
+			--[no-]tap
+			    Output consider taps. All taps are only installed by request.
+
+			--[no-]quiet | --[no-]verbose
+			    If <quiet>, do not output anything, just return the exit status.
+
+			--[no-]requested
+			    Only consider formulas that were manually installed, not formulas that were only dependencies.
+			    Only compatible with --formula.
+
+			QUIRKS:
+			If <item>s are provided, failure exit status will be returned if any are missing.
+			Existing <item>s will still be output to stdout, unless <quiet> is enabled.
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_quiet='' option_requested='no' option_items=() option_type='' # empty, formula, cask, tap
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		--help | -h) help ;;
+		--no-verbose* | --verbose*) __flag --source={item} --target={option_quiet} --non-affirmative --coerce ;;
+		--no-quiet* | --quiet*) __flag --source={item} --target={option_quiet} --affirmative --coerce ;;
+		--type=formula | --type=formulas | --formula | --formulae) option_type=formula ;;
+		--type=cask | --type=casks | --cask | --casks) option_type=cask ;;
+		--type=tap | --type=taps | --tap | --taps) option_type=tap ;;
+		--no-requested* | --requested*) __flag --source={item} --target={option_requested} --affirmative --coerce ;;
+		--)
+			option_items+=("$@")
+			shift $#
+			break
+			;;
+		--*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	local deno_script_args=()
+	if [[ $option_requested == 'yes' ]]; then
+		if [[ $option_type != 'formula' ]]; then
+			help --help='<requested> requires <formula>'
+		fi
+		deno_script_args+=('--requested')
+	fi
+
+	local brew_list_cmd=() brew_info_cmd=()
+	if [[ $option_type == 'tap' ]]; then
+		brew_info_cmd=(brew tap-info --json)
+		deno_script_args+=(--type=tap)
+	else
+		brew_list_cmd=(brew list --versions)
+		# --versions is necessary to limit to installed option_packages, as --full-name/-1 doesn't
+		brew_info_cmd=(brew info --json=v2)
+		if [[ -n $option_type ]]; then
+			brew_list_cmd+=("--$option_type")
+			brew_info_cmd+=("--$option_type")
+			deno_script_args+=("--type=$option_type")
+		fi
+		# if no items, only get the installed ones
+		if [[ ${#option_items[@]} -eq 0 ]]; then
+			brew_info_cmd+=('--installed')
+		fi
+	fi
+
+	# =====================================
+	# Helpers
+
+	function do_brew_simple {
+		# handles only --cask and --formula, but not --requested
+		if [[ $option_quiet == 'yes' ]]; then
+			"${brew_list_cmd[@]}" "${option_items[@]}" &>/dev/null
+		else
+			"${brew_list_cmd[@]}" "${option_items[@]}" | cut -d' ' -f1 | echo-unique --stdin
+		fi
+	}
+
+	function do_brew_advanced {
+		# handles --requested, --cask, and --formula
+		__command_required -- 'deno' || return $?
+		local deno_script
+		deno_script="$(type -P 'brew-installed.ts')"
+		if [[ $option_quiet == 'yes' ]]; then
+			"${brew_info_cmd[@]}" "${option_items[@]}" | "$deno_script" "${deno_script_args[@]}" &>/dev/null
+		else
+			"${brew_info_cmd[@]}" "${option_items[@]}" | "$deno_script" "${deno_script_args[@]}"
+		fi
+	}
+
+	# get names of requested packages
+	if [[ $option_requested == 'no' && ${#brew_list_cmd[@]} -ne 0 ]]; then
+		do_brew_simple
+	elif [[ ${#option_items[@]} -eq 0 ]]; then
+		do_brew_advanced
+	elif [[ "$(do_brew_advanced | echo-count-lines --no-inline --stdin)" -ne ${#option_items[@]} ]]; then
+		return 1
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	brew_installed "$@"
+fi

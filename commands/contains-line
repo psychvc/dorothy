@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+function contains_line() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Returns [0] if any <input> line matched a <needle> line, otherwise returns [1].
+
+			USAGE:
+			contains-line <needle> [...options] [--] ...<input>
+			echo-lines ...<input> | contains-line <needle> [...options]
+
+			OPTIONS:
+			<needle> | --needle=<needle>
+			    Compare each <input> line with this <needle> line.
+			    Use [--needle=<needle>] to provide multiple needles.
+
+			$(__stdinargs__help_options --)
+
+			USAGE:
+			echo-lines -- 'one' 'two' 'three'  | contains-line --needle='two'    # success
+			echo-lines -- 'one' 'two' 'three'  | contains-line --needle='three'  # success
+			echo-lines -- 'one' 'two' 'three'  | contains-line --needle='z'      # failure
+			echo-lines -- 'one' 'two' 'three'  | contains-line --needle=''       # failure
+			echo-lines -- 'one' ' two' 'three'  | contains-line --needle='two'   # failure
+			echo-lines -- 'one' '' 'three'  | contains-line --needle=''          # success
+
+			RETURNS:
+			[0] if ANY <input> line are a <needle> line.
+			[1] if all <input> lines are not a <needle> line.
+
+			QUIRKS:
+			Lines will not contain their trailing newline characters (if any) when compared.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process our own arguments, delegate everything else to stdinargs
+	local item option_needles=() option_args=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--needle='*) option_needles+=("${item#*=}") ;;
+		# forward to stdinargs, however support mixing and matching of our options, with stdinargs options
+		'--')
+			option_args+=("$item" "$@")
+			shift $#
+			break
+			;;
+		'--'*) option_args+=("$item") ;;
+		*)
+			if [[ ${#option_needles[@]} -eq 0 ]]; then
+				option_needles+=("$item")
+			else
+				option_args+=("$item")
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ ${#option_needles[@]} -eq 0 ]]; then
+		help 'No <needle>s provided.'
+	fi
+
+	# =====================================
+	# Action
+
+	local found='no'
+	function __on_line {
+		local line="$1" needle
+		for needle in "${option_needles[@]}"; do
+			if [[ $needle == "$line" ]]; then
+				# it was found, success case, exit immediately
+				found='yes'
+				return 210 # ECUSTOM 210 Processing complete, exit early
+			fi
+		done
+		# not found, continue reading
+	}
+	function __on_finish {
+		[[ $found == 'yes' ]] || return $?
+	}
+
+	stdinargs "${option_args[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	contains_line "$@"
+fi

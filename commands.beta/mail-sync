@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+
+# https://github.com/imapsync/imapsync
+#
+# gmail:
+# https://support.google.com/mail/answer/7126229?hl=en#zippy=%2Cstep-change-smtp-other-settings-in-your-email-client
+# https://imapsync.lamiral.info/FAQ.d/FAQ.Gmail.txt
+#
+# apple:
+# https://support.apple.com/en-us/HT202304
+# imap.mail.me.com
+
+function mail_sync() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local types=(
+		gmail
+		icloud
+		custom
+	)
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Uses imapsync to sync two mailboxes.
+
+			USAGE:
+			mail-sync [--flags...] -- [...args to be forwarded to imapsync]
+
+			FLAGS:
+			--user1=...
+			--user2=...
+			--pass1=... aka --password1=...
+			--pass2=... aka --password2=...
+			--type1=<$(__join --source={types} --delimiter='|')>
+			--type2=<$(__join --source={types} --delimiter='|')>
+			If not supplied, you will be prompted.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process, @todo rewrite with option_ prefix
+	local item args=() user1='' user2='' password1='' password2='' type1='' type2=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--user1='*) user1="${item#*=}" ;;
+		'--user2='*) user2="${item#*=}" ;;
+		'--pass1='*) password1="${item#*=}" ;;
+		'--pass2='*) password2="${item#*=}" ;;
+		'--password1='*) password1="${item#*=}" ;;
+		'--password2='*) password2="${item#*=}" ;;
+		'--type1='*) type1="${item#*=}" ;;
+		'--type2='*) type2="${item#*=}" ;;
+		'--')
+			args+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# origin IMAP server
+	type1="$(
+		choose --linger --required \
+			--question='Who is the host of the origin IMAP server?' \
+			--default="$type1" -- "${types[@]}"
+	)"
+	if [[ $type1 == 'gmail' ]]; then
+		args+=(
+			--host1 imap.gmail.com
+			--gmail1
+			--compress1
+		)
+	elif [[ $type1 == 'icloud' ]]; then
+		args+=(
+			--host1 imap.mail.me.com
+			--ssl1 --port1 993
+			--authmech1 LOGIN
+			--nocompress1
+		)
+	else
+		args+=(
+			--host1 "$(
+				ask --linger --required \
+					--question="What is the origin IMAP server hostname?"
+			)"
+		)
+		if confirm --linger --positive --ppid=$$ -- "Does the origin server use SSL?"; then
+			args+=(--ssl1)
+		fi
+		args+=(
+			--port1 "$(
+				ask --linger --required \
+					--question="What is the origin IMAP server's port?"
+			)"
+		)
+	fi
+	args+=(
+		--user1 "$(
+			ask --linger --required \
+				--question="What is the origin IMAP server's username?" \
+				--default="$user1"
+		)"
+		--password1 "$(
+			ask --linger --required --password \
+				--question="What is the origin IMAP server's password?" \
+				--default="$password1"
+		)"
+	)
+
+	# target IMAP server
+	type2="$(
+		choose --linger --required \
+			--question='Who is the host of the target IMAP server?' \
+			--default="$type2" -- "${types[@]}"
+	)"
+	if [[ $type2 == 'gmail' ]]; then
+		args+=(
+			--host2 imap.gmail.com
+			--gmail2
+			--compress2
+		)
+	elif [[ $type2 == 'icloud' ]]; then
+		args+=(
+			--host2 imap.mail.me.com
+			--ssl2 --port1 993
+			--authmech2 LOGIN
+			--nocompress2
+		)
+	else
+		args+=(
+			--host1 "$(
+				ask --required \
+					--question="What is the target IMAP server's hostname?"
+			)"
+		)
+		if confirm --linger --positive --ppid=$$ -- "Does the target server use SSL?"; then
+			args+=(--ssl2)
+		fi
+		args+=(
+			--port2 "$(
+				ask --linger --required \
+					--question="What is the target IMAP server's port?"
+			)"
+		)
+	fi
+	args+=(
+		--user2 "$(
+			ask --linger --required \
+				--question="What is the target IMAP server's username?" \
+				--default="$user2"
+		)"
+		--password2 "$(
+			ask --linger --required --password \
+				--question="What is the target IMAP server's password?" \
+				--default="$password2"
+		)"
+	)
+
+	# adjustments
+	if [[ $type1 == 'gmail' && $type2 == 'icloud' ]]; then
+		args+=(
+			# Business Gmail
+			--folderlast '[Gmail]/All Mail' --f1f2 '[Gmail]/All Mail=Archive'
+			# Personal Gmail
+			--folderlast '[Google Mail]/All Mail' --f1f2 '[Google Mail]/All Mail=Archive'
+		)
+	fi
+
+	# delete?
+	if confirm --linger --negative --ppid=$$ -- "Delete messages from the origin IMAP server?" "Do this only once you have already completed a successful synchronisation, otherwise only the first label/folder will be applied."; then
+		args+=(--delete1 --delete1emptyfolders --expunge1) # --noexpungeaftereach
+	fi
+
+	# act and continue until success
+	# --usecache
+	# --useuid
+	local __imapsync_status
+	while :; do
+		__imapsync_status=0 && imapsync \
+			--automap \
+			--skipcrossduplicates \
+			--addheader --useheader 'Message-Id' \
+			--syncinternaldates \
+			--nofoldersizes --nofoldersizesatend --no-modulesversion --nolog \
+			"${args[@]}" || __imapsync_status=$?
+		if [[ $__imapsync_status -eq 0 ]]; then
+			__print_style --success='Success!' || return $?
+			break
+		elif [[ $__imapsync_status -eq 143 ]]; then
+			__print_style --stderr --error='Manually terminated' ' ' --status="$__imapsync_status" || return $?
+			return "$__imapsync_status"
+			break
+		else
+			__print_style --stderr --warning='Failure with exit status' ' ' --status="$__imapsync_status" ' ' --notice='restarting...' || return $?
+		fi
+	done
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	mail_sync "$@"
+fi

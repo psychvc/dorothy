@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+function echo_fstab_encode() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			fstab encode all input received.
+
+			USAGE:
+			echo-fstab-encode [...options] [--] ...<input>
+			echo-lines ...<input> | echo-fstab-encode [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-fstab-encode -- '| |=|,|\|#|'
+
+			    |\040|\075|\054|\134|\043|
+
+			echo-lines -- '| |=|,|\|#|' | echo-fstab-encode --stdin
+
+			    |\040|\075|\054|\134|\043|
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function __on_whole {
+		local string="$1" i n char encoded output=''
+		n=${#string}
+		for ((i = 0; i < n; i++)); do
+			char="${string:i:1}"
+			case "$char" in
+			# trunk-ignore(shellcheck/SC1003)
+			' ' | '=' | ',' | '\' | '#')
+				printf -v encoded '\\%03o' "'$char" || return $?
+				output+="$encoded"
+				;;
+			*)
+				output+="$char"
+				;;
+			esac
+		done
+		__print_piece "$output" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_fstab_encode "$@"
+fi

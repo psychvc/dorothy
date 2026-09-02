@@ -1,0 +1,1733 @@
+#!/usr/bin/env bash
+
+# Since 2020 iOS 14 and macOS Big Sur v11 have encryption but requires manual .mobileconfig profile installation which expire; as such it is not worth implementing compared to recommending alternative encrypted DNS services on macOS
+# https://developer.apple.com/videos/play/wwdc2020/10047/
+# https://docs.quad9.net/Setup_Guides/MacOS/Big_Sur_and_later_%28Encrypted%29/
+# https://github.com/paulmillr/encrypted-dns
+
+# dot = dns over tls
+# doh = dns over https
+# sdns = dnscrypt
+# quic = preferred
+
+# Cloudflare Warp doesn't yet support any of the platforms I use, so no support in here yet
+
+function setup_dns() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Compatibility
+
+	# check for support
+	if is-wsl; then
+		__print_style --stderr --code-error1="$0" --error1=' is not applicable on WSL.'
+		return 19 # ENODEV 19 Operation not supported by device
+	elif is-windows; then
+		__print_style --stderr --code-error1="$0" --error1=' is not yet supported on Windows.'
+		return 19 # ENODEV 19 Operation not supported by device
+	elif is-mac; then
+		if __command_missing -- networksetup; then
+			__print_style --stderr --code-error1="$0" --error1=' is not applicable on this macOS environment, as ' --code-error1='networksetup' --error1=' was not available.'
+			return 19 # ENODEV 19 Operation not supported by device
+		fi
+	elif is-ubuntu; then
+		if __command_missing -- systemctl resolvectl; then
+			__print_style --stderr --code-error1="$0" --error1=' is not applicable on this Linux environment, as ' --code-error1='systemctl' ' and/or ' --code-error1='resolvectl' --error1=' were not available.'
+			return 19 # ENODEV 19 Operation not supported by device
+		fi
+	else
+		__print_style --stderr --code-error1="$0" --error1=' is not applicable on this unknown system.'
+		return 19 # ENODEV 19 Operation not supported by device
+	fi
+
+	# ensure the paths are defined, they will be created later
+	local path_vars=('BIN_DIR' 'CONF_DIR' 'DATA_DIR' 'LIB_DIR' 'STATE_DIR' 'SERVICE_DIR' 'LOGS_DIR')
+	function make_system_paths {
+		local values=()
+		for path_var in "${path_vars[@]}"; do
+			values+=("${!path_var}")
+		done
+		__elevate_mkdirp "${values[@]}"
+	}
+	function __check_env_vars {
+		local env_var missing_env_vars=()
+		for env_var in "$@"; do
+			if [[ -z ${!env_var-} ]]; then
+				missing_env_vars+=("$env_var")
+			fi
+		done
+		if [[ ${#missing_env_vars[@]} -ne 0 ]]; then
+			__print_style --stderr --error1='Missing these required environment variables: ' --code-error1="${missing_env_vars[*]}"
+			return 2 # ENOENT 2 No such file or directory
+		fi
+	}
+	__check_env_vars "${path_vars[@]}"
+
+	# =====================================
+	# Configuration
+
+	# -------------------------------------
+	# Locals
+
+	local \
+		service provider \
+		ipv4_servers ipv6_servers dot_servers doh_servers sdns_servers quic_servers dnscrypt_names \
+		local_ipv4_servers=('127.0.0.1') local_ipv6_servers=('::1') \
+		properties=('ipv4_servers' 'ipv6_servers' 'doh_servers' 'dot_servers' 'quic_servers' 'sdns_servers' 'dnscrypt_names')
+
+	# -------------------------------------
+	# Fetch Configuration
+
+	source "$DOROTHY/sources/config.sh"
+
+	# dns.bash provides:
+	local DNS_SERVICE=''
+	local DNS_PROVIDER=''
+	local DNS_IPV4_SERVERS=()
+	local DNS_IPV6_SERVERS=()
+	local DNS_DOH_SERVERS=()
+	local DNS_DOT_SERVERS=()
+	local DNS_QUIC_SERVERS=()
+	local DNS_SDNS_SERVERS=()
+	local DNS_DNSCRYPT_NAMES=()
+	load_dorothy_config 'dns.bash'
+
+	# -------------------------------------
+	# Fetch Services
+
+	local services_id=() services_about=() services_url=()
+
+	# load id
+	__split --target={services_id} --no-zero-length --invoke -- \
+		jq -r '.services | keys_unsorted[]' "$DOROTHY/config/dns.json"
+
+	# load about
+	__split --target={services_about} --no-zero-length --invoke=try -- \
+		jq -r '.services[].about' "$DOROTHY/config/dns.json"
+	if [[ ${#services_id[@]} -ne ${#services_about[@]} ]]; then
+		help 'A DNS service is missing an about, or an about is multiline when it should be single line.'
+	fi
+
+	# load url
+	__split --target={services_url} --no-zero-length --invoke=try -- \
+		jq -r '.services[].url' "$DOROTHY/config/dns.json"
+	if [[ ${#services_id[@]} -ne ${#services_url[@]} ]]; then
+		help 'A DNS service is missing a URL.'
+	fi
+
+	# -------------------------------------
+	# Fetch Providers
+
+	local providers_id=() providers_url=() providers_about=()
+
+	# load id
+	__split --target={providers_id} --no-zero-length --invoke -- \
+		jq -r '.providers | keys_unsorted[]' "$DOROTHY/config/dns.json"
+
+	# load about
+	__split --target={providers_about} --no-zero-length --invoke=try -- \
+		jq -r '.providers[].about' "$DOROTHY/config/dns.json"
+	if [[ ${#providers_id[@]} -ne ${#providers_about[@]} ]]; then
+		help 'A DNS provider is missing an about, or an about is multiline when it should be single line.'
+	fi
+
+	# load url
+	__split --target={providers_url} --no-zero-length --invoke=try -- \
+		jq -r '.providers[].url' "$DOROTHY/config/dns.json"
+	if [[ ${#providers_id[@]} -ne ${#providers_url[@]} ]]; then
+		help 'A DNS provider is missing a URL.'
+	fi
+
+	# =====================================
+	# Helpers
+
+	# @todo only change necessary vpn properties; unnecessary: `firewall`
+	# local nordvpn_connect='' nordvpn_killswitch='' nordvpn_firewall=''
+	function __is_vpn_interface {
+		local interface="$1"
+		if [[ $interface =~ (nordlynx|vpn|tun|tap) ]]; then # regex fuzzy match
+			return 0
+		fi
+		return 1
+	}
+	function disconnect_vpn {
+		if __command_exists -- nordvpn; then
+			nordvpn set connect off || :
+			nordvpn set killswitch off || :
+			nordvpn disconnect || :
+			waiter 5
+		fi
+	}
+	function reconnect_vpn {
+		if __command_exists -- nordvpn && nordvpn account; then
+			if nordvpn connect; then
+				# @todo apply dns, apply backups of killswitch and connect options
+				# nordvpn set dns "..."
+				nordvpn set killswitch on || :
+				nordvpn set connect on || :
+				waiter 5
+			fi
+			__verify_connection_and_wait
+		fi
+	}
+
+	function __fail_if_dns_service_is_installed_but_not_intended {
+		local id="$1" bin="$2" exists
+		exists="$(type -P "$id" || :)"
+		if [[ -n $exists && $exists != "$bin" ]]; then
+			__print_style --stderr \
+				--error1='The DNS service ' --code-error1="$id" ' has a non-standard installation at: ' --code-error1="$exists" --newline \
+				--error1='Remove it and try again...'
+			return 75 # EPROGMISMATCH 75 Program version wrong
+		fi
+	}
+
+	function __fail_if_dns_service_is_not_installed {
+		local id="$1" bin="$2"
+		if [[ ! -x $bin ]]; then
+			__print_style --stderr --error1='The DNS service ' --code-error1="$id" ' failed to install to: ' --code-error1="$bin"
+			return 9 # EBADF 9 Bad file descriptor
+		fi
+	}
+
+	function __verify_connection {
+		is-dns-working --no-quiet || return $?
+		is-internet-working || return $?
+	}
+
+	function __verify_connection_and_wait {
+		local attempt=1
+		while ! __verify_connection; do
+			__print_style --notice1='Failed to verify connection, trying again in 10 seconds.'
+			waiter 10
+			attempt="$((attempt + 1))"
+			__print_style --notice1="Attempt $attempt..."
+		done
+	}
+
+	function verify_dns_resolvectl {
+		local attempt="${1:-1}" status=0
+		resolvectl query cloudflare.com --no-pager || status=$?
+		resolvectl status --no-pager || status=$?
+		resolvectl statistics --no-pager || status=$?
+		if [[ $status -ne 0 ]]; then
+			__print_style --notice='DNS service failed to verify, trying again in 10 seconds.'
+			waiter 10
+			attempt="$((attempt + 1))"
+			__print_style --notice="Attempt $attempt..."
+			verify_dns_resolvectl "$attempt"
+			return $?
+		fi
+		return 0
+	}
+
+	# https://support.apple.com/en-au/guide/terminal/apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac
+	# https://apple.stackexchange.com/a/366388/15131
+	# stop the service (if it exists) temporarily
+	function dns_service_stop {
+		local file="$1" id
+
+		# check if the service file exists
+		# which determines if it is even installed
+		if [[ ! -f $file ]]; then
+			return 0
+		fi
+
+		# it does exist
+		if is-mac; then
+			id="$(fs-path --no-parents --no-extensions -- "$file")"
+			service-helper --stop -- "$id" || :
+		else
+			service-helper --stop -- "$id" || :
+		fi
+	}
+
+	# stops, uninstalls, and deletes the service (if it exists)
+	function dns_service_disable_and_stop {
+		local file="$1" id
+
+		# check if the service file exists
+		# which determines if it is even installed
+		if [[ ! -f $file ]]; then
+			return 0
+		fi
+
+		# it does exist
+		id="$(fs-path --no-parents --no-extensions -- "$file")"
+		if is-mac; then
+			# Usage: launchctl unload <service-path, service-path2, ...>
+			# -w      Additionally disables the service such that future load
+			#         operations will result in a service which launchd tracks but
+			#         cannot be launched or discovered in any way.
+			service-helper --disable -- "system/$id" || :
+			service-helper --stop -- "$id" || :
+			service-helper --unload -- "$file" || :
+			dns_service_remove -- "$LOGS_DIR/"*"$id"*.log
+		else
+			service-helper --disable --stop --status -- "$id" || :
+		fi
+		dns_service_remove --reload -- "$file"
+	}
+
+	# loads/installs the service, then enables and starts it
+	function dns_service_enable {
+		local file="$1" id
+		id="$(fs-path --no-parents --no-extensions -- "$file")"
+		if is-mac; then
+			# ensure correct permissions, not sure why
+			# but [homebrew services] does this, so doing it here
+			fs-own --root --permissions='+t' -- "$file"
+			service-helper --load -- "$file" || :
+			# service-helper  --start -- "system/$id" || :
+			service-helper --start -- "$id" || :
+			waiter 5
+		else
+			service-helper --enable --start --status -- "$id" || :
+		fi
+	}
+
+	function dns_service_logs {
+		echo-file -- "$LOGS_DIR/"*"$id"*.log || :
+	}
+
+	function dns_service_reload {
+		# after service additions/removals
+		# systemctl needs to be reloaded apparently
+		if __command_exists -- systemctl; then
+			eval-helper --elevate -- systemctl daemon-reload
+			eval-helper --elevate -- systemctl reset-failed
+			# ^ use elevation, otherwise prompted via ubuntu user password
+		fi
+	}
+
+	function dns_service_remove {
+		# process
+		local item service='' flags=() reload='no' remove_paths=()
+		while [[ $# -ne 0 ]]; do
+			item="$1"
+			shift
+			case "$item" in
+			'--service='*) service="${item#*=}" ;;
+			'--negative' | '--positive' | '--bool') flags+=("$item") ;;
+			'--no-reload'* | '--reload'*) __flag --source={item} --target={reload} --affirmative ;;
+			'--')
+				remove_paths+=("$@")
+				shift $#
+				break
+				;;
+			'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+			*) remove_paths+=("$item") ;;
+			esac
+		done
+
+		# add default flag
+		if [[ ${#flags[@]} -eq 0 ]]; then
+			flags+=('--positive')
+		fi
+
+		# service
+		if [[ -n $service ]]; then
+			# remove common paths (files, and directories)
+			remove_paths+=(
+				# custom
+				"$BIN_DIR/$service"
+				"$CONF_DIR/$service"
+				"$DATA_DIR/$service"
+				"$LIB_DIR/$service"
+
+				# xdg
+				"$XDG_BIN_HOME/$service"
+				"$XDG_CONFIG_HOME/$service"
+				"$XDG_DATA_HOME/$service"
+				"$XDG_STATE_HOME/$service"
+
+				# standard
+				"/usr/local/bin/$service"
+				"/usr/local/etc/$service"
+				"/usr/local/share/$service"
+				"/usr/local/lib/$service"
+
+				# services
+				"$SERVICE_DIR/"*"$service"*
+				/Library/LaunchAgents/*"$service"*   # user
+				/Library/LaunchDaemons/*"$service"*  # everyone
+				/etc/init.d/*"$service"*             # alt
+				/usr/lib/systemd/system/*"$service"* # alt
+				/etc/systemd/system/*"$service"*     # desired
+
+				# logs
+				"$LOGS_DIR/"*"$service"*.log
+			)
+		fi
+
+		# remove files
+		local remove_paths_that_exist=() had_removal='no'
+		__split --target={remove_paths_that_exist} --no-zero-length --invoke -- \
+			echo-if-present --elevate -- "${remove_paths[@]}"
+		if [[ ${#remove_paths_that_exist[@]} -ne 0 ]] && fs-remove --quiet --confirm --elevate -- "${remove_paths_that_exist[@]}"; then
+			had_removal='yes'
+		fi
+
+		# reload?
+		if [[ $reload == 'yes' && $had_removal == 'yes' ]]; then
+			dns_service_reload
+		fi
+	}
+
+	# =====================================
+	# DNS Service: System DNS
+
+	function system_dns__configure {
+		# determine servers and action
+		local servers action action_title
+		action="$1"
+		action_title="$(__get_uppercase_first_letter -- "$action")"
+		if [[ $action == 'enable' ]]; then
+			servers=(
+				"${ipv4_servers[@]}"
+				"${ipv6_servers[@]}"
+			)
+		else
+			servers=(
+				"${local_ipv4_servers[@]}"
+				"${local_ipv6_servers[@]}"
+			)
+		fi
+		if [[ ${#servers[@]} -eq 0 ]]; then
+			__print_error 'servers is empty, something is misconfigured'
+			return 1
+		fi
+
+		# handle the os changes
+		if is-mac; then
+			# -------------------------------------
+			# DNS Service: macOS
+			# https://support.apple.com/en-us/HT202516
+
+			# log
+			__print_style --h2="$action_title $system_dns__title"
+
+			# apply
+			local interface
+			network-interface list | while read -r interface; do
+				eval-helper --elevate -- networksetup -setdnsservers "$interface" "${servers[@]}"
+			done
+
+			# log
+			__print_style --g2="$action_title $system_dns__title"
+		else
+			# -------------------------------------
+			# DNS Service: Systemd (aka systemd-resolved, systemd-resolve, resolvectl, resolv)
+			# https://gist.github.com/balupton/f4aa448731d6b1bdf505c10078b9a8ad#file-resolv-bash
+
+			# https://wiki.archlinux.org/title/Systemd-resolved
+			# https://man.archlinux.org/man/systemd-resolved.8#/ETC/RESOLV.CONF
+
+			# /run/systemd/resolve/stub-resolv.conf
+			# ^ lists the 127.0.0.53 DNS stub as the only DNS server.
+			# ^ It also contains a list of search domains that are in use by systemd-resolved.
+
+			# /usr/lib/systemd/resolv.conf
+			# ^ lists the 127.0.0.53 DNS stub as only DNS server.
+			# ^ This file does not contain any search domains.
+
+			# /run/systemd/resolve/resolv.conf
+			# ^ containing information about all known DNS servers
+			# ^ it does not know a concept of per-interface DNS servers and hence only contains system-wide DNS server definitions.
+
+			# /etc/systemd/resolved.conf
+			# ^ The DNS servers contacted are determined from the global settings in
+
+			# /etc/systemd/network/*.network
+			# ^ er-link static settings
+
+			# /etc/resolv.conf
+			# ^ used by everything
+
+			#  To improve compatibility, /etc/resolv.conf is read in order to discover configured system DNS servers, but only if it is not a symlink to /run/systemd/resolve/stub-resolv.conf, /usr/lib/systemd/resolv.conf or /run/systemd/resolve/resolv.conf (see below).
+
+			# log
+			__print_style --h2="$action_title $system_dns__title"
+
+			# dump the data for where we are
+			eval-helper --elevate -- resolvectl status --no-pager || :
+
+			# temporarily disable these services while we redo the configuration files
+			# https://wiki.archlinux.org/title/systemd-networkd
+			# resolved handles dns, networkd handles network interfaces
+			service-helper --stop -- systemd-networkd systemd-resolved || :
+
+			# allow modifications in case something has locked it
+			# for some reason this can fail
+			eval-helper --elevate -- chattr -i /etc/resolv.conf || :
+
+			# make life simple, using only /etc/resolv.conf
+			# https://www.freedesktop.org/software/systemd/man/resolved.conf.html
+			local resolv_paths=(
+				/run/systemd/resolve/stub-resolv.conf
+				/usr/lib/systemd/resolv.conf
+				/run/systemd/resolve/resolv.conf
+				/etc/systemd/resolved.conf
+				/etc/resolv.conf
+			)
+			fs-remove --quiet --no-confirm --elevate -- "${resolv_paths[@]}"
+
+			# prepare config for file, and for interfaces
+			local Domains DNSOverTLS DNSSEC
+			Domains='~.'
+			if [[ ${#dot_servers[@]} -ne 0 ]]; then
+				DNSOverTLS='true'
+				# DNSSEC='true' <= fails on cloudflare teams, perhaps more
+				DNSSEC='allow-downgrade'
+			else
+				DNSOverTLS='opportunistic'
+				DNSSEC='allow-downgrade'
+			fi
+
+			# apply specific config
+			if [[ $action == 'enable' ]]; then
+				# using systemd, the initial lines are for ping/nslookup/etc, the [Resolve] lines are for systemd-resolve
+				echo-write -- /etc/resolv.conf <<-EOF
+					nameserver 127.0.0.53
+					options edns0 trust-ad
+					search .
+
+					[Resolve]
+					DNS=${servers[*]}
+					Domains=$Domains
+					DNSSEC=$DNSSEC
+					DNSOverTLS=$DNSOverTLS
+				EOF
+			else
+				# use custom service
+				echo-write -- /etc/resolv.conf <<-EOF
+					nameserver ${servers[0]}
+					options edns0 trust-ad
+				EOF
+			fi
+
+			# we have redone the configuration files so we must now restart the services
+			# and ensure that are correctly enabled in case they weren't
+			# which could happen via vpns or another dns service
+			service-helper --enable --start -- systemd-resolved systemd-networkd || :
+
+			# flush their caches
+			eval-helper --elevate -- resolvectl flush-caches --no-pager || :
+			eval-helper --elevate -- resolvectl reset-server-features --no-pager || :
+
+			# apply the changes to their interfaces
+			local interfaces=() default_route
+			__split --target={interfaces} --no-zero-length --stdin < <(network-interface list | echo-values --stdin || :)
+			if [[ ${#interfaces[@]} -eq 0 ]]; then
+				__print_style --stderr --error1='No interfaces were found.'
+				return 1
+			fi
+			for interface in "${interfaces[@]}"; do
+				# skip vpn interfaces
+				if __is_vpn_interface "$interface"; then
+					__print_style --dim="Skipping VPN interface: " --code="$interface"
+					continue
+				fi
+
+				# save default route
+				# as nordvpn needs its interface as the default route
+				if resolvectl default-route "$interface" | grep --quiet --fixed-strings --regexp=yes; then
+					default_route='yes'
+				else
+					default_route='no'
+				fi
+
+				# remove other changes
+				eval-helper --elevate -- resolvectl revert "$interface" || continue
+
+				# apply intended changes
+				eval-helper --elevate -- resolvectl default-route "$interface" "$default_route"
+				eval-helper --elevate -- resolvectl domain "$interface" "$Domains"
+				eval-helper --elevate -- resolvectl dnssec "$interface" "$DNSSEC"
+				eval-helper --elevate -- resolvectl dnsovertls "$interface" "$DNSOverTLS"
+				eval-helper --elevate -- resolvectl dns "$interface" "${servers[@]}"
+
+				# reboot the interface if it isn't a vpn
+				waiter 5
+				network-interface restart "$interface"
+			done
+
+			# dump the status now that we are done
+			eval-helper --elevate -- resolvectl status --no-pager || :
+
+			# now that it is all done, enable or disable
+			if [[ $action == 'enable' ]]; then
+				# verify
+				verify_dns_resolvectl
+			else
+				service-helper --disable --stop -- systemd-resolved
+			fi
+
+			# after significant systemd changes, it may need to be reloaded
+			# eval-helper --elevate -- systemctl daemon-reload
+			# eval-helper --elevate -- systemctl reset-failed
+
+			# log
+			__print_style --g2="$action_title $system_dns__title"
+		fi
+	}
+
+	# =====================================
+	# DNS Services
+
+	local arch
+	arch="$(get-arch)"
+
+	local system_dns__title='System DNS'
+
+	local adguard_home__asset_url adguard_home__asset_file adguard_home__archive_filter='AdGuardHome/AdGuardHome'
+	local adguard_home__title="AdGuard Home" adguard_home__bin_id='AdGuardHome'
+	local adguard_home__bin_file="$BIN_DIR/$adguard_home__bin_id"
+	local adguard_home__conf_dir="$CONF_DIR/$adguard_home__bin_id"
+	local adguard_home__conf_file="$adguard_home__conf_dir/$adguard_home__bin_id.yaml"
+	local adguard_home__data_dir="$DATA_DIR/$adguard_home__bin_id"
+	local adguard_home__state_dir="$STATE_DIR/$adguard_home__bin_id"
+	local adguard_home__state_pid_file="$adguard_home__state_dir/$adguard_home__bin_id.pid"
+	local adguard_home__state_log_file="$adguard_home__state_dir/$adguard_home__bin_id.log"
+	local adguard_home__bin_cmd=(
+		# https://github.com/AdguardTeam/AdGuardHome/wiki/Configuration#command-line
+		"$adguard_home__bin_file"
+		'--config' "$adguard_home__conf_file"
+		'--work-dir' "$adguard_home__data_dir"
+		'--pidfile' "$adguard_home__state_pid_file"
+		'--logfile' "$adguard_home__state_log_file"
+	)
+	local adguard_home__service_file
+
+	local cloudflared__slug='cloudflare/cloudflared' cloudflared__asset_regexp cloudflared__archive_filter=''
+	local cloudflared__title='Cloudflared' cloudflared__bin_id='cloudflared' cloudflared__brew_id='cloudflared'
+	local cloudflared__bin_file="$BIN_DIR/$cloudflared__bin_id"
+	local cloudflared__proxy_service_id cloudflared__proxy_service_file
+
+	local dnscrypt_proxy__slug='DNSCrypt/dnscrypt-proxy' dnscrypt_proxy__asset_regexp dnscrypt_proxy__archive_filter='**/dnscrypt-proxy'
+	local dnscrypt_proxy__title='DNSCrypt Proxy' dnscrypt_proxy__bin_id='dnscrypt-proxy' dnscrypt_proxy__brew_id='dnscrypt-proxy'
+	local dnscrypt_proxy__bin_file="$BIN_DIR/$dnscrypt_proxy__bin_id"
+	local dnscrypt_proxy__conf_dir="$CONF_DIR/$dnscrypt_proxy__bin_id"
+	local dnscrypt_proxy__conf_id="$dnscrypt_proxy__bin_id.toml" dnscrypt_proxy__conf_pathname='dnscrypt-proxy/example-dnscrypt-proxy.toml'
+	local dnscrypt_proxy__conf_file="$dnscrypt_proxy__conf_dir/$dnscrypt_proxy__conf_id"
+	local dnscrypt_proxy__bin_cmd=(
+		"$dnscrypt_proxy__bin_file"
+		'-config' "$dnscrypt_proxy__conf_file"
+	)
+	local dnscrypt_proxy__service_file
+
+	if is-mac; then
+		# launchctl
+		adguard_home__service_file="$SERVICE_DIR/$adguard_home__bin_id.plist"
+		cloudflared__archive_filter='cloudflared'
+		cloudflared__proxy_service_id='com.cloudflare.cloudflared-proxy'
+		cloudflared__proxy_service_file="$SERVICE_DIR/$cloudflared__proxy_service_id.plist"
+		dnscrypt_proxy__service_file="$SERVICE_DIR/$dnscrypt_proxy__bin_id.plist"
+		if [[ $arch == 'a64' ]]; then
+			adguard_home__asset_file='AdGuardHome_darwin_arm64.zip'
+			cloudflared__asset_regexp='cloudflared-darwin-arm64[.]tgz$'
+			dnscrypt_proxy__asset_regexp='dnscrypt-proxy-macos_arm64.*?[.]zip$'
+		elif [[ $arch == 'x64' ]]; then
+			adguard_home__asset_file='AdGuardHome_darwin_amd64.zip'
+			cloudflared__asset_regexp='cloudflared-darwin-amd64[.]tgz$'
+			dnscrypt_proxy__asset_regexp='dnscrypt-proxy-macos_x86_64.*?[.]zip$'
+		fi
+	elif is-linux; then
+		# systemctl / resolvectl / systemd-resolved
+		adguard_home__service_file="$SERVICE_DIR/$adguard_home__bin_id.service"
+		cloudflared__proxy_service_id='cloudflared-proxy'
+		cloudflared__proxy_service_file="$SERVICE_DIR/$cloudflared__proxy_service_id.service"
+		dnscrypt_proxy__service_file="$SERVICE_DIR/$dnscrypt_proxy__bin_id.service"
+		if [[ $arch == 'a64' ]]; then
+			adguard_home__asset_file='AdGuardHome_linux_arm64.tar.gz'
+			cloudflared__asset_regexp='cloudflared-linux-arm64$'
+			dnscrypt_proxy__asset_regexp='dnscrypt-proxy-linux_arm64.*?[.]zip$'
+		elif [[ $arch == 'x64' ]]; then
+			adguard_home__asset_file='AdGuardHome_linux_amd64.tar.gz'
+			cloudflared__asset_regexp='cloudflared-linux-amd64$'
+			dnscrypt_proxy__asset_regexp='dnscrypt-proxy-linux_x86_64.*?[.]zip$'
+		elif [[ $arch == 'x32' ]]; then
+			adguard_home__asset_file='AdGuardHome_linux_386.tar.gz'
+			cloudflared__asset_regexp='cloudflared-linux-386$'
+			dnscrypt_proxy__asset_regexp='dnscrypt-proxy-linux_i386.*?[.]zip$'
+		fi
+	else
+		__print_error 'Unknown Operating System'
+		return 19 # ENODEV 19 Operation not supported by device
+	fi
+	adguard_home__asset_url="https://static.adguard.com/adguardhome/release/${adguard_home__asset_file-}"
+
+	function die_incompatible_dns_service {
+		local service_title="${item#*=}"
+		__print_style --stderr --error1='This platform architecture ' --code-error1="$arch" --error1=' does not yet support: ' --code-error1="$service_title"
+		return 19 # ENODEV 19 Operation not supported by device
+	}
+
+	# =====================================
+	# DNS Service: AdGuard Home
+
+	function __adguard_home__available {
+		[[ -n ${adguard_home__asset_file-} ]] || return $?
+	}
+	function __adguard_home__installed {
+		is-executable -- "$adguard_home__bin_file" || return $?
+	}
+	function adguard_home__install {
+		local action action_title temp__bin_file
+		if __adguard_home__installed; then
+			action='upgrade'
+			action_title='Stop & Upgrade'
+		else
+			action='install'
+			action_title='Install'
+		fi
+
+		# check
+		if ! __adguard_home__available; then
+			die_incompatible_dns_service "$adguard_home__title"
+			return $?
+		fi
+
+		# log
+		__print_style --h2="$action_title $adguard_home__title"
+
+		# ensure directories
+		__elevate_mkdirp "$adguard_home__conf_dir" "$adguard_home__data_dir" "$adguard_home__state_dir"
+
+		# download the installer, prior to disabling
+		temp__bin_file="$(fs-temp --cache --directory='dorothy' --directory='setup-dns' --file="$adguard_home__bin_id")"
+		down "$adguard_home__asset_url" \
+			--archive-glob="$adguard_home__archive_filter" \
+			--filepath="$temp__bin_file"
+
+		# now that we have downloaded everything, uninstall any unsupported installations, and check there are no remaining unsupported installations
+		__fail_if_dns_service_is_installed_but_not_intended "$adguard_home__bin_id" "$adguard_home__bin_file"
+
+		# now that we know if there is an installation, it is supported, check if it is installed, if so stop it
+		if __adguard_home__installed; then
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service stop || :
+		fi
+
+		# now that the service is intended, installed, and stopped, install/upgrade it
+		eval-helper --elevate -- mv -- "$temp__bin_file" "$adguard_home__bin_file" || :
+		fs-own --elevate --x -- "$adguard_home__bin_file" || :
+		# ^ allow failure, as we will check this later
+
+		# now check the install/upgrade worked
+		__fail_if_dns_service_is_not_installed "$adguard_home__bin_id" "$adguard_home__bin_file"
+
+		# success
+		__print_style --g2="$action_title $adguard_home__title"
+	}
+	function adguard_home__uninstall {
+		# check
+		if ! __adguard_home__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="Uninstall $adguard_home__title"
+
+		# stop and uninstall the service
+		eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service stop || :
+		eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service uninstall || :
+
+		# ensure adguard home has stopped
+		killall "$adguard_home__bin_id" || :
+
+		# clean it all up
+		dns_service_remove --reload --service="$adguard_home__bin_id" -- "$adguard_home__bin_file" "$adguard_home__conf_dir" "$adguard_home__data_dir" "$adguard_home__state_dir" "$adguard_home__service_file"
+
+		# log
+		__print_style --g2="Uninstall $adguard_home__title"
+	}
+	function adguard_home__configure {
+		local action action_title upstream_servers server pattern replace
+		action="$1" # enable/disable
+		action_title="$(__get_uppercase_first_letter -- "$action")"
+
+		# check
+		if ! __adguard_home__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="$action_title $adguard_home__title"
+
+		# this is here, because we need to seed the configuration file before we can do changes to it
+		if [[ ! -s $adguard_home__conf_file && $action == 'enable' ]]; then
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service install || :
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service start || :
+			confirm --ppid=$$ -- "Press <enter> once you have completed the initial $adguard_home__title setup at http://127.0.0.1:3000"
+		fi
+
+		# stop before config update
+		eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service stop || :
+
+		# prepare desired providers
+		upstream_servers=(
+			"${dot_servers[@]}"
+			"${doh_servers[@]}"
+			"${quic_servers[@]}"
+			"${sdns_servers[@]}"
+		)
+		if [[ ${#upstream_servers[@]} -eq 0 ]]; then
+			upstream_servers=(
+				"${ipv4_servers[@]}"
+				"${ipv6_servers[@]}"
+			)
+		fi
+
+		# update the configuration with the new upstreams
+		pattern='  upstream_dns:\n(  - .+\n)+'
+		replace=$'  upstream_dns:\n'
+		for server in "${upstream_servers[@]}"; do
+			replace+="  - $server"$'\n'
+		done
+		# trunk-ignore(shellcheck/SC2094)
+		echo-regexp --regexp="$pattern" --replace="$replace" <"$adguard_home__conf_file" | echo-write --atomic -- "$adguard_home__conf_file"
+		eval-helper --elevate -- \
+			"${adguard_home__bin_cmd[@]}" --check-config
+
+		# enable or disable
+		# Service control action: status, install, uninstall, start, stop, restart, reload (configuration).
+		if [[ $action == 'enable' ]]; then
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service install || :
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service reload || :
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service start || :
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service status || :
+		else
+			eval-helper --elevate -- "${adguard_home__bin_cmd[@]}" --service uninstall || :
+		fi
+
+		# log
+		__print_style --g2="$action_title $adguard_home__title"
+	}
+
+	# =====================================
+	# DNS Service: Cloudflared Proxy
+
+	function __cloudflared__available {
+		[[ -n ${cloudflared__asset_regexp-} ]] || return $?
+	}
+	function __cloudflared__installed {
+		is-executable -- "$cloudflared__bin_file"
+	}
+	function cloudflared__install {
+		local action action_title temp__bin_file
+		if __cloudflared__installed; then
+			action='upgrade'
+			action_title='Stop & Upgrade'
+		else
+			action='install'
+			action_title='Install'
+		fi
+
+		# check
+		if ! __cloudflared__available; then
+			die_incompatible_dns_service "$cloudflared__title"
+			return $?
+		fi
+
+		# log
+		__print_style --h2="$action_title $cloudflared__title"
+
+		# download the upgrade, prior to disabling
+		# setup-util --cli=cloudflared APT_KEY='https://pkg.cloudflare.com/cloudflare-main.gpg' APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://pkg.cloudflare.com/cloudflared jammy main' APT='cloudflared'
+		# setup-util --cli=cloudflared APT_KEY='https://pkg.cloudflare.com/cloudflare-main.gpg' APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://pkg.cloudflare.com/cloudflared {RELEASE} main' APT='cloudflared'
+		temp__bin_file="$(fs-temp --cache --directory='dorothy' --directory='setup-dns' --file="$cloudflared__bin_id")"
+		github-download \
+			--slug="$cloudflared__slug" \
+			--latest \
+			--asset-regexp="$cloudflared__asset_regexp" \
+			--archive-glob="$cloudflared__archive_filter" \
+			--filepath="$temp__bin_file"
+
+		# now that we have downloaded everything, uninstall any unsupported installations, and check there are no remaining unsupported installations
+		if __is_brew; then
+			# don't use brew for this, as we want complete control
+			brew uninstall "$cloudflared__brew_id" &>/dev/null || :
+		fi
+		__fail_if_dns_service_is_installed_but_not_intended "$cloudflared__bin_id" "$cloudflared__bin_file"
+
+		# now that we know if there is an installation, it is supported, check if it is installed, if so stop it
+		if __cloudflared__installed; then
+			dns_service_stop "$cloudflared__proxy_service_file"
+		fi
+
+		# now that the service is intended, installed, and stopped, install/upgrade it
+		eval-helper --elevate -- mv -- "$temp__bin_file" "$cloudflared__bin_file"
+		fs-own --elevate --x -- "$cloudflared__bin_file"
+
+		# now check the install/upgrade worked
+		__fail_if_dns_service_is_not_installed "$cloudflared__bin_id" "$cloudflared__bin_file"
+
+		# success
+		__print_style --g2="$action_title $cloudflared__title"
+	}
+	function cloudflared__uninstall {
+		# check
+		if ! __cloudflared__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="Uninstall $cloudflared__title"
+
+		# stop, disable, uninstall the service if it exists
+		dns_service_disable_and_stop "$cloudflared__proxy_service_file"
+
+		# # if we are using tunnels
+		# if [[ "${#CLOUDFLARED__TUNNELS[@]}" -ne 0 ]]; then
+		# 	# only remove the service file, as tunnels uses the same binary
+		# 	dns_service_remove --reload -- "$cloudflared__proxy_service_file"
+		# else
+		# ensure everything related to the proxy is removed
+		dns_service_remove --reload --service="$cloudflared__bin_id" -- "$cloudflared__proxy_service_file"
+
+		# log
+		__print_style --g2="Uninstall $cloudflared__title"
+	}
+	function cloudflared__configure {
+		local action action_title upstream_servers upstream_section upstream_args server
+		action="$1" # enable/disable
+		action_title="$(__get_uppercase_first_letter -- "$action")"
+		upstream_section=''
+		upstream_args=''
+
+		# check
+		if ! __cloudflared__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="$action_title $cloudflared__title"
+
+		# check
+		__fail_if_dns_service_is_installed_but_not_intended "$cloudflared__bin_id" "$cloudflared__bin_file"
+
+		# stop, disable, uninstall the old service if it exists
+		dns_service_disable_and_stop "$cloudflared__proxy_service_file"
+
+		# only update the configuration, if we are [enable] action
+		# as the SERVICE IS THE CONFIGURATION for [cloudflared proxy-dns]
+		# as it doesn't support a configuration file
+		# so we have to configure it via CLI args in the service definition
+		if [[ $action == 'enable' ]]; then
+			# check it is installed
+			__fail_if_dns_service_is_not_installed "$cloudflared__bin_id" "$cloudflared__bin_file"
+
+			# prepare upstreams (despite docs, cloudflared doesn't support tls)
+			upstream_servers=(
+				"${doh_servers[@]}"
+				"${quic_servers[@]}"
+			)
+			if [[ ${#upstream_servers[@]} -eq 0 ]]; then
+				upstream_servers=(
+					"${ipv4_servers[@]}"
+					"${ipv6_servers[@]}"
+				)
+			fi
+
+			# configure service with the upstreams
+			if is-mac; then
+				# generate upstreams
+				for server in "${upstream_servers[@]}"; do
+					upstream_section+=$'\n'"			<string>--upstream</string>"
+					upstream_section+=$'\n'"			<string>$server</string>"
+				done
+
+				# create service with custom upstreams
+				# <string>--address</string>
+				# <string>0.0.0.0</string>
+				echo-write -- "$cloudflared__proxy_service_file" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>Label</key>
+		<string>${cloudflared__proxy_service_id}</string>
+		<key>ProgramArguments</key>
+		<array>
+			<string>${cloudflared__bin_file}</string>
+			<string>proxy-dns</string>${upstream_section}
+		</array>
+		<key>RunAtLoad</key>
+		<true/>
+		<key>StandardOutPath</key>
+		<string>${LOGS_DIR}/${cloudflared__proxy_service_id}.out.log</string>
+		<key>StandardErrorPath</key>
+		<string>${LOGS_DIR}/${cloudflared__proxy_service_id}.err.log</string>
+		<key>KeepAlive</key>
+		<dict>
+			<key>SuccessfulExit</key>
+			<false/>
+		</dict>
+		<key>ThrottleInterval</key>
+		<integer>5</integer>
+	</dict>
+</plist>
+EOF
+
+			else
+				# generate upstreams
+				for server in "${upstream_servers[@]}"; do
+					upstream_args+=" --upstream $(echo-escape-command -- "$server")"
+				done
+
+				# create service with custom upstreams
+				echo-write -- "$cloudflared__proxy_service_file" <<-EOF
+					[Unit]
+					Description=${cloudflared__proxy_service_id}
+					Wants=network-online.target nss-lookup.target
+					Before=nss-lookup.target
+
+					[Service]
+					AmbientCapabilities=CAP_NET_BIND_SERVICE
+					CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+					DynamicUser=yes
+					ExecStart=${cloudflared__bin_file} proxy-dns --address 0.0.0.0 ${upstream_args}
+
+					[Install]
+					WantedBy=multi-user.target
+				EOF
+			fi
+
+			# enable the service
+			dns_service_enable "$cloudflared__proxy_service_file"
+		fi
+
+		# log
+		__print_style --g2="$action_title $cloudflared__title"
+	}
+
+	# =====================================
+	# DNS Service: DNSCrypt Proxy
+	# https://github.com/DNSCrypt/dnscrypt-proxy/wiki/Installation-linux
+
+	function validate_dnscrypt_names {
+		# prep the cache file
+		local dnscrypt_names_file
+		dnscrypt_names_file="$(fs-temp --cache --directory='dorothy' --directory='setup-dns' --file='dnscrypt-names')"
+
+		# write the names to the file if it is empty
+		if [[ ! -s $dnscrypt_names_file ]]; then
+			fetch 'https://download.dnscrypt.info/resolvers-list/v2/public-resolvers.md' | echo-regexp -ongm --regexp='^## (.+)$' --replace='$1' >"$dnscrypt_names_file"
+		fi
+
+		# read the file into an array
+		local available_dnscrypt_names=() a b found
+		__split --target={available_dnscrypt_names} --no-zero-length --stdin <"$dnscrypt_names_file"
+		if [[ ${#dnscrypt_names[@]} -ne 0 ]]; then
+			for a in "${dnscrypt_names[@]}"; do
+				found='no'
+				for b in "${available_dnscrypt_names[@]}"; do
+					if [[ $a == "$b" ]]; then
+						found='yes'
+						break
+					fi
+				done
+				if [[ $found == 'no' ]]; then
+					__print_style --stderr --error1='Invalid dnscrypt-proxy configuration, the dnscrypt-name ' --code-error1="$a" --error1=' is invalid. Find a list of valid names at: ' --code-error1="$dnscrypt_names_file"
+					return 3 # ESRCH 3 No such process
+				fi
+			done
+		elif [[ -n ${provider-} ]]; then
+			__print_style --stderr --error1='Invalid dnscrypt-proxy configuration, no dnscrypt-names were provided for the provider ' --code-error1="$provider"
+			return 6 # ENXIO 6 Device not configured
+		fi
+
+		# success
+		return 0
+	}
+	function __dnscrypt_proxy__available {
+		[[ -n ${dnscrypt_proxy__asset_regexp-} ]] || return $?
+	}
+	function __dnscrypt_proxy__installed {
+		is-executable -- "$dnscrypt_proxy__bin_file"
+	}
+	function dnscrypt_proxy__install {
+		local action action_title temp__bin_file
+		if __dnscrypt_proxy__installed; then
+			action='upgrade'
+			action_title='Stop & Upgrade'
+		else
+			action='install'
+			action_title='Install'
+		fi
+
+		# check
+		if ! __dnscrypt_proxy__available; then
+			die_incompatible_dns_service "$dnscrypt_proxy__title"
+			return $?
+		fi
+
+		# prepare and log
+		__print_style --h2="$action_title $dnscrypt_proxy__title"
+
+		# ensure directories
+		__elevate_mkdirp "$dnscrypt_proxy__conf_dir"
+
+		# validate dnscrypt names
+		validate_dnscrypt_names
+
+		# download the upgrade, prior to disabling
+		temp__bin_file="$(fs-temp --cache --directory='dorothy' --directory='setup-dns' --file="$dnscrypt_proxy__bin_id")"
+		github-download \
+			--slug="$dnscrypt_proxy__slug" \
+			--latest \
+			--asset-regexp="$dnscrypt_proxy__asset_regexp" \
+			--archive-glob="$dnscrypt_proxy__archive_filter" \
+			--filepath="$temp__bin_file"
+
+		# download the configuration if it doesn't exist
+		# https://github.com/DNSCrypt/dnscrypt-proxy/blob/master/dnscrypt-proxy/example-dnscrypt-proxy.toml
+		if [[ ! -s $dnscrypt_proxy__conf_file ]]; then
+			temp_conf_file="$(fs-temp --cache --directory='dorothy' --directory='setup-dns' --file="$dnscrypt_proxy__conf_id")"
+			github-download \
+				--slug="$dnscrypt_proxy__slug" \
+				--head \
+				--pathname="$dnscrypt_proxy__conf_pathname" \
+				--filepath="$temp_conf_file"
+			eval-helper --elevate -- mv -- "$temp_conf_file" "$dnscrypt_proxy__conf_file"
+		fi
+
+		# now that we have downloaded everything, uninstall any unsupported installations, and check there are no remaining unsupported installations
+		if __is_brew; then
+			brew uninstall "$dnscrypt_proxy__brew_id" &>/dev/null || :
+		fi
+		__fail_if_dns_service_is_installed_but_not_intended "$dnscrypt_proxy__bin_id" "$dnscrypt_proxy__bin_file"
+
+		# now that we know if there is an installation, it is supported, check if it is installed, if so stop it
+		if __dnscrypt_proxy__installed; then
+			# only tell prior cmd to stop if the prior cmd exists
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service stop || :
+		fi
+
+		# now that the service is intended, installed, and stopped, install/upgrade it
+		eval-helper --elevate -- mv -- "$temp__bin_file" "$dnscrypt_proxy__bin_file"
+		fs-own --elevate --x -- "$dnscrypt_proxy__bin_file"
+
+		# now check the install/upgrade worked
+		__fail_if_dns_service_is_not_installed "$dnscrypt_proxy__bin_id" "$dnscrypt_proxy__bin_file"
+
+		# success
+		__print_style --g2="$action_title $dnscrypt_proxy__title"
+	}
+	function dnscrypt_proxy__uninstall {
+		# check
+		if ! __dnscrypt_proxy__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="Uninstall $dnscrypt_proxy__title"
+
+		# stop and uninstall the service
+		eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service stop || :
+		eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service uninstall || :
+
+		# ensure adguard home has stopped
+		killall "$dnscrypt_proxy__bin_id" || :
+
+		# clean it all up
+		dns_service_remove --reload --service="$dnscrypt_proxy__bin_id" -- "$dnscrypt_proxy__bin_file" "$dnscrypt_proxy__conf_dir" "$dnscrypt_proxy__service_file"
+
+		# log
+		__print_style --g2="Uninstall $dnscrypt_proxy__title"
+	}
+	function dnscrypt_proxy__configure {
+		local action action_title temp_conf_file
+		action="$1" # enable/disable
+		action_title="$(__get_uppercase_first_letter -- "$action")"
+
+		# check
+		if ! __dnscrypt_proxy__installed; then
+			return 0
+		fi
+
+		# log
+		__print_style --h2="$action_title $dnscrypt_proxy__title"
+
+		# validate dnscrypt names
+		validate_dnscrypt_names
+
+		# if the configuration doesn't exist
+		if [[ ! -s $dnscrypt_proxy__conf_file ]]; then
+			# then give up, as the internet is disabled in this mode
+			# as we deactivated the prior service
+			__print_style --stderr \
+				--error1='Missing configuration file: ' --code-error1="$dnscrypt_proxy__conf_file" --newline \
+				--notice1='You should attempt reinstallation then try again.' --newline \
+				--stdout --e2="$action_title $dnscrypt_proxy__title"
+		fi
+
+		# stop the service if it is installed, before config update
+		if [[ -s $dnscrypt_proxy__service_file ]]; then
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service stop || :
+		fi
+
+		# update the configuration with the new [dnscrypt_names], if any
+		if [[ ${#dnscrypt_names[@]} -ne 0 ]]; then
+			config-helper --elevate --file="$dnscrypt_proxy__conf_file" -- \
+				--field='ipv4_servers' --no-quote --value='true' \
+				--field='ipv6_servers' --no-quote --value='true' \
+				--field='dnscrypt_servers' --no-quote --value='true' \
+				--field='doh_servers' --no-quote --value='true' \
+				--field='server_names' --no-quote --value="[$(
+					echo-quote -- "${dnscrypt_names[@]}" | echo-join ', ' --stdin
+				)]"
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --check -config "$dnscrypt_proxy__conf_file"
+		fi
+
+		# enable or disable
+		if [[ $action == 'enable' ]]; then
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service uninstall || : # Needed before install, otherwise: Failed to install DNSCrypt client proxy: Init already exists: /Library/LaunchDaemons/dnscrypt-proxy.plist
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service install || :
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service start || :
+		elif [[ -s $dnscrypt_proxy__service_file ]]; then
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service stop || :
+			eval-helper --elevate -- "${dnscrypt_proxy__bin_cmd[@]}" --service uninstall || :
+		fi
+
+		# log
+		__print_style --g2="$action_title $dnscrypt_proxy__title"
+	}
+
+	# ---------------------------------
+	# Availability and Installation Detection
+
+	local available_services_id=() installed_services_id=()
+
+	function __check_dns_service_helpers {
+		local id="$1" fn_id
+		fn_id="${id//-/_}" # replace dashes with underscores
+		local fn fns=(
+			"__${fn_id}__available"
+			"__${fn_id}__installed"
+			"${fn_id}__install"
+			"${fn_id}__uninstall"
+			"${fn_id}__configure"
+		)
+		for fn in "${fns[@]}"; do
+			command -v "$fn" >/dev/null || __return $? -- __print_style --stderr --error1='The DNS service ' --code-error1="$fn_id" --error1=' is missing its helper: ' --code-error1="$fn" || return $?
+		done
+		return 0
+	}
+
+	function fetch_available_and_installed_services {
+		# reset
+		available_services_id=()
+		installed_services_id=()
+		# update
+		local id fn_id
+		for id in "${services_id[@]}"; do
+			__check_dns_service_helpers "$id"
+			fn_id="${id//-/_}"               # replace dashes with underscores
+			if "__${fn_id}__available"; then # eval
+				available_services_id+=("$id")
+				if "__${fn_id}__installed"; then # eval
+					installed_services_id+=("$id")
+				fi
+			fi
+		done
+	}
+
+	# =====================================
+	# Arguments
+
+	# @todo move this later so that it also outputs providers
+	function help {
+		fetch_available_and_installed_services
+		cat <<-EOF >&2
+			ABOUT:
+			Setup the DNS service for your system.
+
+			USAGE:
+			setup-dns [...options]
+
+			OPTIONS:
+			--installed | --uninstalled
+			    If provided, will check if the service is installed or uninstalled.
+
+			--install | --uninstall
+			    If provided, will install the service, or uninstall and disable the service.
+
+			--enable | --disable
+			    If provided, will install and enable the service, or disable the service.
+
+			--service=<service>
+			    Use and install if necessary, this DNS <service>.
+			--provider=<provider>
+			    Configure the DNS <service> with this DNS <provider>.
+
+			--ipv4=<ipv4-server>
+			--ipv6=<ipv6-server>
+			--doh=<doh-server>
+			--dot=<dot-server>
+			--quic=<quic-server>
+			--sdns=<sdns-server>
+			--dnscrypt=<dnscrypt-server>
+
+			SERVICES:
+			system
+			$(__print_lines "${services_id[@]}")
+
+			AVAILABLE SERVICES:
+			system
+			$(__print_lines "${available_services_id[@]}")
+
+			INSTALLED SERVICES:
+			system
+			$(__print_lines "${installed_services_id[@]}")
+
+			PROVIDERS:
+			$(__print_lines "${providers_id[@]}")
+
+			CONFIGURATION:
+			DNS_SERVICE=$(echo-quote -- "$DNS_SERVICE")
+			DNS_PROVIDER=$(echo-quote -- "$DNS_PROVIDER")
+			DNS_IPV4_SERVERS=($(echo-quote -- "${DNS_IPV4_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_IPV6_SERVERS=($(echo-quote -- "${DNS_IPV6_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_DOH_SERVERS=($(echo-quote -- "${DNS_DOH_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_DOT_SERVERS=($(echo-quote -- "${DNS_DOT_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_QUIC_SERVERS=($(echo-quote -- "${DNS_QUIC_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_SDNS_SERVERS=($(echo-quote -- "${DNS_SDNS_SERVERS[@]}" | echo-join ', ' --stdin))
+			DNS_DNSCRYPT_NAMES=($(echo-quote -- "${DNS_DNSCRYPT_NAMES[@]}" | echo-join ', ' --stdin))
+
+			CONFIGURATION FILES:
+			dns.bash
+			dns.json
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_installed='' option_install='' option_enable='' option_confirm='' option_service='' option_provider='' option_ipv4_servers=() option_ipv6_servers=() option_doh_servers=() option_dot_servers=() option_quic_servers=() option_sdns_servers=() option_dnscrypt_names=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--no-installed'* | '--installed'*) __flag --source={item} --target={option_installed} --affirmative ;;
+		'--no-uninstalled'* | '--uninstalled'*) __flag --source={item} --target={option_installed} --non-affirmative ;;
+		'--no-install'* | '--install'*) __flag --source={item} --target={option_install} --affirmative ;;
+		'--no-uninstall'* | '--uninstall'*) __flag --source={item} --target={option_install} --non-affirmative ;;
+		'--no-enable'* | '--enable'*) __flag --source={item} --target={option_enable} --affirmative ;;
+		'--no-disable'* | '--disable'*) __flag --source={item} --target={option_enable} --non-affirmative ;;
+		'--no-confirm'* | '--confirm'*) __flag --source={item} --target={option_confirm} --affirmative ;;
+		'--service='*) option_service="${item#*=}" ;;
+		'--provider='*) option_provider="${item#*=}" ;;
+		'--ipv4='*) option_ipv4_servers+=("${item#*=}") ;;
+		'--ipv6='*) option_ipv6_servers+=("${item#*=}") ;;
+		'--doh='*) option_doh_servers+=("${item#*=}") ;;
+		'--dot='*) option_dot_servers+=("${item#*=}") ;;
+		'--quic='*) option_quic_servers+=("${item#*=}") ;;
+		'--sdns='*) option_sdns_servers+=("${item#*=}") ;;
+		'--dnscrypt='*) option_dnscrypt_names+=("${item#*=}") ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# ---------------------------------
+	# Select DNS Provider/Servers
+
+	function render_service_or_provider {
+		# prefix with an empty dim to disable the default dimming in results
+		local id="$1" about="$2" url="$3"
+		if is-value -- "$about" "$url"; then
+			__print_style --dim='' --bold+underline="$id" $':\n' "$about" $'\n' --dim="$url"
+		elif is-value -- "$about"; then
+			__print_style --dim='' --bold+underline="$id" $':\n' "$about"
+		elif is-value -- "$url"; then
+			__print_style --dim='' --bold+underline="$id" $':\n' --dim="$url"
+		else
+			__print_style --dim='' --bold+underline="$id"
+		fi
+	}
+
+	function select_service {
+		local id index about url options=()
+		if __command_exists -- nordvpn; then
+			service='system'
+			__print_style --notice='NordVPN installation detected, only permitting system DNS service.'
+		else
+			# add system
+			id='system'
+			about="Use the system's default DNS service. Since 2018, Linux's systemd-resolved v239 includes encryption — https://github.com/systemd/systemd/blob/04c00944d8494b88b29fd432189cf575dd0de0db/NEWS#L9866-L9870 — macOS to this day still requires an alternative service/profile for encryption."
+			url=''
+			options+=(
+				"$id"
+				"$(render_service_or_provider "$id" "$about" "$url")"
+			)
+
+			# render service options
+			for id in "${available_services_id[@]}"; do
+				for index in "${!services_id[@]}"; do
+					if [[ ${services_id[index]} == "$id" ]]; then
+						about="${services_about[index]}"
+						url="${services_url[index]}"
+						break
+					fi
+				done
+				options+=(
+					"$id"
+					"$(render_service_or_provider "$id" "$about" "$url")"
+				)
+			done
+
+			# prompt the user which dns service they wish to use
+			service="$(
+				choose --required --linger --confirm="$option_confirm" --label \
+					--question='Which DNS service do you wish to be your primary service?' \
+					--default="${option_service:-"$DNS_SERVICE"}" -- "${options[@]}"
+			)"
+		fi
+	}
+
+	function __has_arg_provider {
+		[[ ${#option_ipv4_servers[@]} -ne 0 ||
+			${#option_ipv6_servers[@]} -ne 0 ||
+			${#option_doh_servers[@]} -ne 0 ||
+			${#option_dot_servers[@]} -ne 0 ||
+			${#option_quic_servers[@]} -ne 0 ||
+			${#option_sdns_servers[@]} -ne 0 ||
+			${#option_dnscrypt_names[@]} -ne 0 ]] || return $?
+	}
+
+	function __has_env_provider {
+		[[ ${#DNS_IPV4_SERVERS[@]} -ne 0 ||
+			${#DNS_IPV6_SERVERS[@]} -ne 0 ||
+			${#DNS_DOH_SERVERS[@]} -ne 0 ||
+			${#DNS_DOT_SERVERS[@]} -ne 0 ||
+			${#DNS_QUIC_SERVERS[@]} -ne 0 ||
+			${#DNS_SDNS_SERVERS[@]} -ne 0 ||
+			${#DNS_DNSCRYPT_NAMES[@]} -ne 0 ]] || return $?
+	}
+
+	function select_provider {
+		local index id url about options=() property
+
+		# only run once
+		if [[ -n ${provider-} ]]; then
+			return 0
+		fi
+
+		# reset shared vars
+		for property in "${properties[@]}"; do
+			eval "$property=()"
+		done
+
+		# render arg provider if applicable
+		if __has_arg_provider; then
+			id='arg'
+			about='Use the provided DNS servers specified in the CLI arguments'
+			url=''
+			options+=(
+				"$id"
+				"$(render_service_or_provider "$id" "$about" "$url")"
+			)
+		fi
+
+		# render env provider if applicable
+		if __has_env_provider; then
+			id='env'
+			about='Use the provided DNS servers specified in your dns.bash user configuration'
+			url=''
+			options+=(
+				"$id"
+				"$(render_service_or_provider "$id" "$about" "$url")"
+			)
+		fi
+
+		# render provider options
+		for index in "${!providers_id[@]}"; do
+			id="${providers_id[index]}"
+			about="${providers_about[index]}"
+			url="${providers_url[index]}"
+			options+=(
+				"$id"
+				"$(render_service_or_provider "$id" "$about" "$url")"
+			)
+		done
+
+		# select provider
+		provider="$(
+			choose --required --linger --confirm="$option_confirm" --label \
+				--question='Which DNS provider to use?' \
+				--default="${option_provider:-"$DNS_PROVIDER"}" -- "${options[@]}"
+		)"
+
+		# apply
+		if [[ $provider == 'arg' ]]; then
+			ipv4_servers=("${option_ipv4_servers[@]}")
+			ipv6_servers=("${option_ipv6_servers[@]}")
+			doh_servers=("${option_doh_servers[@]}")
+			dot_servers=("${option_dot_servers[@]}")
+			quic_servers=("${option_quic_servers[@]}")
+			sdns_servers=("${option_sdns_servers[@]}")
+			dnscrypt_names=("${option_dnscrypt_names[@]}")
+		elif [[ $provider == 'env' ]]; then
+			ipv4_servers=("${DNS_IPV4_SERVERS[@]}")
+			ipv6_servers=("${DNS_IPV6_SERVERS[@]}")
+			doh_servers=("${DNS_DOH_SERVERS[@]}")
+			dot_servers=("${DNS_DOT_SERVERS[@]}")
+			quic_servers=("${DNS_QUIC_SERVERS[@]}")
+			sdns_servers=("${DNS_SDNS_SERVERS[@]}")
+			dnscrypt_names=("${DNS_DNSCRYPT_NAMES[@]}")
+		else
+			for property in "${properties[@]}"; do
+				__split --target="{$property}" --no-zero-length --invoke -- \
+					jq -r \
+					--arg provider "$provider" \
+					--arg property "$property" \
+					'.providers[$provider][$property][]' \
+					"$DOROTHY/config/dns.json" 2>/dev/null || :
+			done
+		fi
+	}
+
+	# ---------------------------------
+	# Action
+
+	function check_installed {
+		fetch_available_and_installed_services
+		local want="${option_service:-"$DNS_SERVICE"}"
+
+		# Check any installed, or specific is installed
+		if [[ -z $want ]]; then
+			if [[ ${#installed_services_id[@]} -eq 0 ]]; then
+				__print_style --error1='No custom DNS is installed.'
+				return 1
+			else
+				__print_style --good1='The following custom DNS is installed: ' --code-good1="${installed_services_id[*]}"
+				return 0
+			fi
+		else
+			local id found='no'
+			for id in "${installed_services_id[@]}"; do
+				if [[ $want == "$id" ]]; then
+					found='yes'
+					break
+				fi
+			done
+			if [[ $found == 'no' ]]; then
+				__print_style --error1='The custom DNS is not installed: ' --code-error1="$want"
+				return 1
+			else
+				__print_style --good1='The custom DNS is installed: ' --code-good1="$want"
+				return 0
+			fi
+		fi
+	}
+
+	function check_uninstalled {
+		fetch_available_and_installed_services
+		local want="${option_service:-"$DNS_SERVICE"}"
+
+		# Check all uninstalled, or specific is uninstalled
+		if [[ -z $want ]]; then
+			if [[ ${#installed_services_id[@]} -eq 0 ]]; then
+				__print_style --good1='All custom DNS is uninstalled.'
+				return 1
+			else
+				__print_style --error1='The following custom DNS are still installed: ' --code-error1="${installed_services_id[*]}"
+				return 0
+			fi
+		else
+			local id found='no'
+			for id in "${installed_services_id[@]}"; do
+				if [[ $want == "$id" ]]; then
+					found='yes'
+					break
+				fi
+			done
+			if [[ $found == 'yes' ]]; then
+				__print_style --error1='The custom DNS is still installed: ' --code-error1="$want"
+				return 1
+			else
+				__print_style --good1='The custom DNS is uninstalled: ' --code-good1="$want"
+				return 0
+			fi
+		fi
+	}
+
+	function install_only {
+		fetch_available_and_installed_services
+		make_system_paths
+		if [[ -z ${service-} ]]; then
+			select_service
+		fi
+		local id fn_id service_fn_id="${service//-/_}" # replace dashes with underscores
+
+		# Install then configure the service if not system
+		if [[ $service == 'system' ]]; then
+			return 0
+		elif ! __verify_connection; then
+			# If the internet is not working, disable other services and enable system, then install and enable our desired service
+			disconnect_vpn
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}"            # replace dashes with underscores
+				"${fn_id}__configure" disable # eval
+			done
+			select_provider
+			system_dns__configure enable
+			__verify_connection_and_wait
+
+			# Install and enable our desired service
+			reconnect_vpn
+			"${service_fn_id}__install" # eval
+		else
+			# If the internet is working, install the desired service, disable alternative services, then enable the desired service
+			"${service_fn_id}__install" # eval
+		fi
+	}
+
+	function install_and_enable {
+		fetch_available_and_installed_services
+		make_system_paths
+		select_service
+		select_provider
+		local id fn_id service_fn_id="${service//-/_}" # replace dashes with underscores
+
+		# Install then configure the service if not system
+		if [[ $service == 'system' ]]; then
+			# Disable other services and enable system
+			disconnect_vpn
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}"            # replace dashes with underscores
+				"${fn_id}__configure" disable # eval
+			done
+			system_dns__configure enable
+			__verify_connection_and_wait
+			reconnect_vpn
+		elif ! __verify_connection; then
+			# If the internet is not working, disable other services and enable system, then install and enable our desired service
+			disconnect_vpn
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}"            # replace dashes with underscores
+				"${fn_id}__configure" disable # eval
+			done
+			system_dns__configure enable
+			__verify_connection_and_wait
+
+			# Install and enable our desired service
+			reconnect_vpn
+			"${service_fn_id}__install" # eval
+			disconnect_vpn
+			system_dns__configure disable
+			"${service_fn_id}__configure" enable # eval
+			__verify_connection_and_wait
+			reconnect_vpn
+		else
+			# If the internet is working, install the desired service, disable alternative services, then enable the desired service
+			"${service_fn_id}__install" # eval
+			disconnect_vpn
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}" # replace dashes with underscores
+				if [[ $fn_id != "$service_fn_id" ]]; then
+					"${fn_id}__configure" disable # eval
+				fi
+			done
+			system_dns__configure disable
+			"${service_fn_id}__configure" enable # eval
+			__verify_connection_and_wait
+			reconnect_vpn
+		fi
+	}
+
+	function uninstall_and_disable {
+		fetch_available_and_installed_services
+		make_system_paths
+		local id fn_id service_fn_id
+
+		# uninstall all services
+		if [[ -z ${service-} ]]; then
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}"    # replace dashes with underscores
+				"${fn_id}__uninstall" # eval
+			done
+		else
+			# uninstall specific service
+			service_fn_id="${service//-/_}" # replace dashes with underscores
+			"${service_fn_id}__uninstall"   # eval
+		fi
+		service=''
+		service_fn_id=''
+
+		# go back to system
+		select_provider
+		system_dns__configure enable
+		__verify_connection_and_wait
+		reconnect_vpn
+	}
+
+	function disable_only {
+		fetch_available_and_installed_services
+		make_system_paths
+		local id fn_id service_fn_id
+
+		# uninstall all services
+		if [[ -z ${service-} ]]; then
+			for id in "${installed_services_id[@]}"; do
+				fn_id="${id//-/_}"            # replace dashes with underscores
+				"${fn_id}__configure" disable # eval
+			done
+
+		else
+			# uninstall specific service
+			service_fn_id="${service//-/_}"       # replace dashes with underscores
+			"${service_fn_id}__configure" disable # eval
+		fi
+		service=''
+		service_fn_id=''
+
+		# go back to system
+		select_provider
+		system_dns__configure enable
+		__verify_connection_and_wait
+		reconnect_vpn
+	}
+
+	# verify that installed install and enable options are not used together
+	if [[ -n $option_installed ]]; then
+		if [[ -n $option_install || -n $option_enable ]]; then
+			help --='--installed, --install, and --enable are mutually exclusive'
+		fi
+	elif [[ -n $option_install ]]; then
+		if [[ -n $option_installed || -n $option_enable ]]; then
+			help --='--installed, --install, and --enable are mutually exclusive'
+		fi
+	elif [[ -n $option_enable ]]; then
+		if [[ -n $option_installed || -n $option_install ]]; then
+			help --='--installed, --install, and --enable are mutually exclusive'
+		fi
+	fi
+
+	__print_style --h1='Setup DNS'
+	if [[ $option_installed == 'yes' ]]; then
+		check_installed
+	elif [[ $option_installed == 'no' ]]; then
+		check_uninstalled
+	elif [[ $option_install == 'yes' ]]; then
+		install_only
+	elif [[ $option_install == 'no' ]]; then
+		uninstall_and_disable
+	elif [[ $option_enable == 'yes' ]]; then
+		install_and_enable
+	elif [[ $option_enable == 'no' ]]; then
+		disable_only
+	else
+		install_and_enable
+	fi
+	__print_style --g1='Setup DNS'
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_dns "$@"
+fi

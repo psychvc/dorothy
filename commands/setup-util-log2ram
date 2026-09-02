@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# https://github.com/azlux/log2ram
+# https://www.freedesktop.org/software/systemd/man/journald.conf.html
+# https://www.digitalocean.com/community/tutorials/how-to-manage-logfiles-with-logrotate-on-ubuntu-20-04
+
+function setup_util_log2ram() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-linux; then
+		__print_style --stderr --notice="[$0] is only intended to be run on Linux systems, skipping." || return $?
+		return 0
+	fi
+
+	# prune at the start to free up space
+	eval-helper --elevate -- truncate -s 0 /var/log/syslog*
+	eval-helper --elevate -- journalctl --rotate
+	eval-helper --elevate -- journalctl --vacuum-time=1h
+
+	# install log2ram
+	# official docs has two issues (bullseye instead of main, and http instead https)
+	local options=(
+		--cli='log2ram'
+		"$@"
+		APT_KEY='https://azlux.fr/repo.gpg'
+		APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://packages.azlux.fr/debian/ stable main'
+		APT='log2ram' # UBUNTU
+	)
+	setup-util "${options[@]}"
+
+	# install log rotate
+	# https://packages.debian.org/sid/amd64/logrotate/filelist
+	# /usr/sbin/logrotate
+	options=(
+		--cli='logrotate'
+		"$@"
+		APT='logrotate' # UBUNTU
+	)
+	setup-util "${options[@]}"
+
+	# if installed, then apply
+	if __command_exists -- log2ram; then
+		# stop
+		service-helper --disable --stop --ignore -- log2ram logrotate
+
+		# configure
+		if confirm --linger --positive --ppid=$$ -- 'Use sensible defaults?'; then
+			echo-write -- /etc/logrotate.conf <<-EOF
+				compress
+				create
+				daily
+				nomail
+				notifempty
+				rotate 0
+				su root adm
+			EOF
+			echo-write -- /etc/systemd/journald.conf <<-EOF
+				[Journal]
+				MaxFileSec=6h
+				MaxRetentionSec=6h
+				RuntimeMaxUse=10M
+				Storage=volatile
+				SystemMaxUse=10M
+			EOF
+			echo-write -- /etc/log2ram.conf <<-EOF
+				MAIL=true
+				PATH_DISK="/var/log"
+				SIZE=200M
+			EOF
+		fi
+
+		# cleanup
+		service-helper --enable --start --status --logs -- log2ram logrotate
+		eval-helper --elevate -- du -hs /var/log/* | sort -h | tail -n 3
+		df -h
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_log2ram "$@"
+fi

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+# https://github.com/ClementTsang/bottom
+# top alternative
+
+# https://github.com/ClementTsang/bottom/releases
+# bottom-0.9.3-1.x86_64.rpm
+# bottom-musl-0.9.3-1.x86_64.rpm
+# bottom-musl_0.9.3_amd64.deb
+# bottom-musl_0.9.3_arm64.deb
+# bottom-musl_0.9.3_armhf.deb
+# bottom_0.9.3_amd64.deb
+# bottom_0.9.3_arm64.deb
+# bottom_0.9.3_armhf.deb
+# bottom_aarch64-apple-darwin.tar.gz
+# bottom_aarch64-unknown-linux-gnu.tar.gz
+# bottom_aarch64-unknown-linux-musl.tar.gz
+# bottom_armv7-unknown-linux-gnueabihf.tar.gz
+# bottom_armv7-unknown-linux-musleabihf.tar.gz
+# bottom_i686-pc-windows-msvc.zip
+# bottom_i686-unknown-linux-gnu.tar.gz
+# bottom_i686-unknown-linux-musl.tar.gz
+# bottom_powerpc64le-unknown-linux-gnu.tar.gz
+# bottom_riscv64gc-unknown-linux-gnu.tar.gz
+# bottom_x86_64-apple-darwin.tar.gz
+# bottom_x86_64-pc-windows-gnu.zip
+# bottom_x86_64-pc-windows-msvc.zip
+# bottom_x86_64-unknown-freebsd-12-3.tar.gz
+# bottom_x86_64-unknown-freebsd-13-1.tar.gz
+# bottom_x86_64-unknown-linux-gnu.tar.gz
+# bottom_x86_64-unknown-linux-gnu2-17.tar.gz
+# bottom_x86_64-unknown-linux-musl.tar.gz
+# bottom_x86_64_installer.msi
+# choco.zip
+
+# https://packages.gentoo.org/packages/sys-process/bottom
+
+# https://repology.org/project/bottom/versions
+
+function setup_util_bottom() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=btm "$@"; then
+		return 0
+	fi
+
+	# setup
+	local arch options=(
+		--name='bottom'
+		--cli='btm'
+		"$@"
+		AUR='bottom-bin' # ARCH
+		BREW='bottom'
+		CARGO='bottom'
+		DNF_COPR='atim/bottom'
+		DNF='bottom'                # FEDORA
+		EMERGE='sys-process/bottom' # GENTOO
+		EOPKG='bottom'              # SOLUS
+		NIX='bottom'
+		PORT='bottom'
+		SCOOP='bottom'
+		WINGET='bottom'
+	)
+	arch="$(get-arch)"
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='ClementTsang/bottom' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB='btm'
+		)
+	}
+	if is-mac; then
+		__add_download_option '_x86_64-apple-darwin.tar.gz' || :
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '_aarch64-unknown-linux-gnu.tar.gz' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option '_armv7-unknown-linux-gnu.tar.gz' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '_x86_64-unknown-linux-musl.tar.gz' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '_i686-unknown-linux-musl.tar.gz' || :
+		elif [[ $arch == 'r64' ]]; then
+			__add_download_option '_riscv64gc-unknown-linux-gnu.tar.gz' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+	# .msi failed with: This installation package could not be opened. Contact the application vendor to verify that this is a valid Windows Installer package.
+	# function __add_installer_option {
+	# 	local url
+	# 	url="$(__get_github_asset_url "$1")" || return $?
+	# 	options+=(
+	# 		INSTALLER="$url"
+	# 		INSTALLER_OPEN=yes
+	# 	)
+	# }
+	# elif is-windows; then
+	# 	if [[ "$arch" = 'x64' ]]; then
+	# 		__add_installer_option '_x86_64_installer.msi' || :
+	# 	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_bottom "$@"
+fi

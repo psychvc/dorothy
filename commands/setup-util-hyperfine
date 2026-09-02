@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+# https://github.com/sharkdp/hyperfine
+# benchmarking
+
+# https://github.com/sharkdp/hyperfine/releases
+# hyperfine-musl_1.17.0_amd64.deb
+# hyperfine-musl_1.17.0_i686.deb
+# hyperfine-v1.17.0-aarch64-unknown-linux-gnu.tar.gz
+# hyperfine-v1.17.0-arm-unknown-linux-gnueabihf.tar.gz
+# hyperfine-v1.17.0-arm-unknown-linux-musleabihf.tar.gz
+# hyperfine-v1.17.0-i686-pc-windows-msvc.zip
+# hyperfine-v1.17.0-i686-unknown-linux-gnu.tar.gz
+# hyperfine-v1.17.0-i686-unknown-linux-musl.tar.gz
+# hyperfine-v1.17.0-x86_64-apple-darwin.tar.gz
+# hyperfine-v1.17.0-x86_64-pc-windows-gnu.zip
+# hyperfine-v1.17.0-x86_64-pc-windows-msvc.zip
+# hyperfine-v1.17.0-x86_64-unknown-linux-gnu.tar.gz
+# hyperfine-v1.17.0-x86_64-unknown-linux-musl.tar.gz
+# hyperfine_1.17.0_amd64.deb
+# hyperfine_1.17.0_arm64.deb
+# hyperfine_1.17.0_armhf.deb
+# hyperfine_1.17.0_i686.deb
+
+# https://packages.debian.org/sid/amd64/hyperfine/filelist
+# /usr/bin/hyperfine
+
+function setup_util_hyperfine() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=hyperfine "$@"; then
+		return 0
+	fi
+
+	# setup
+	local arch options=(
+		--cli='hyperfine'
+		"$@"
+		APK='hyperfine' # ALPINE
+		AUR='hyperfine' # ARCH
+		BREW='hyperfine'
+		BSD='hyperfine'
+		CARGO='hyperfine'
+		CONDA_CHANNEL='conda-forge'
+		CONDA='hyperfine'
+		NIX='hyperfine'
+		PORT='hyperfine'
+		RPM='hyperfine'    # FEDORA
+		XBPS='hyperfine'   # VOID
+		ZYPPER='hyperfine' # SUSE
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='sharkdp/hyperfine' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="*/$2"
+		)
+	}
+	function __add_deb_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DEB="$url"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		__add_download_option '-x86_64-apple-darwin.tar.gz' 'hyperfine' || :
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_deb_option '_arm64.deb' || :
+			__add_download_option '-aarch64-unknown-linux-gnu.tar.gz' 'hyperfine' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_deb_option '_armhf.deb' || :
+			__add_download_option '-arm-unknown-linux-musl.tar.gz' 'hyperfine' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_deb_option '_amd64.deb' || :
+			__add_download_option '-x86_64-unknown-linux-musl.tar.gz' 'hyperfine' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_deb_option '_i686.deb' || :
+			__add_download_option '-i686-unknown-linux-musl.tar.gz' 'hyperfine' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option '-x86_64-pc-windows-msvc.zip' 'hyperfine.exe' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '-i686-pc-windows-msvc.zip' 'hyperfine.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_hyperfine "$@"
+fi

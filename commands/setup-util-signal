@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+# https://signal.org/
+# https://www.makeuseof.com/install-signal-desktop-linux/
+
+function setup_util_signal() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--app='Signal'
+		"$@"
+		APT_KEY='https://updates.signal.org/desktop/apt/keys.asc'
+		APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://updates.signal.org/desktop/apt xenial main'
+		APT='signal-desktop' # UBUNTU
+		AUR='signal-desktop' # ARCH
+		CASK='signal'
+		FLATPAK='org.signal.Signal'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_signal "$@"
+fi

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+function echo_trim_each_line_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local inputs=(
+		' a '
+		$'\t b \t\n c ' # newline
+		$'\t d \t'
+		' e '
+		'f'
+		$'g\n'
+		$' h \n\t i \t\n j \nk\n'
+	)
+
+	# trunk-ignore(cspell/error)
+	eval-tester --name='trimming arguments' --stdout=$'ab\ncdefg\nh\ni\nj\nk\n' --trailing-newlines -- \
+		echo-trim-each-line -- "${inputs[@]}"
+
+	{
+		__print_join -- "${inputs[@]}"
+	} | eval-tester --name='trimming arguments' --stdout=$'a\nb\nc\nd\ne\nf\ng\n\nh\ni\nj\nk\n' --trailing-newlines -- \
+		echo-trim-each-line --stdin
+
+	return 0
+)
+function echo_trim_each_line() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Trims surrounding whitespace from each line.
+
+			USAGE:
+			echo-trim-each-line [...options] [--] ...<input>
+			echo-lines ...<input> | echo-trim-each-line [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-trim-each-line -- ' a '
+
+			    a
+
+			echo-trim-each-line -- $'\t a \t\n b '
+
+			    a
+			    b
+
+			echo-lines -- $'\t a \t' ' b ' | echo-trim-each-line --stdin
+
+			    a
+			    b
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function on_inline {
+		local input="$1"
+		__replace --optional --source={input} --leading-whitespace --trailing-whitespace || return $?
+	}
+	function on_line {
+		# see the [git history] for this file for [grep], [gawk], [sd], and [sed] solutions
+		# trunk-ignore(shellcheck/SC2034)
+		local input="$1" result
+		__replace --optional --source={input} --target={result} --leading-whitespace --trailing-whitespace || return $?
+		__print_lines "$result" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		echo_trim_each_line_test
+	else
+		echo_trim_each_line "$@"
+	fi
+fi

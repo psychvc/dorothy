@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+function setup_util_mas() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-mac; then
+		__print_style --stderr --notice="[$0] is only intended to be run on macOS systems, skipping." || return $?
+		return 0
+	fi
+
+	# setup
+	local options=(
+		--name='Mac App Store CLI'
+		--cli='mas'
+		"$@"
+		BREW='mas'
+	)
+	setup-util "${options[@]}" || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_mas "$@"
+fi

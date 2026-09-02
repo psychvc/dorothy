@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+
+function get_url_upgrade() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Upgrade a <url> to https if possible.
+
+			USAGE:
+			get-url-upgrade <url>
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_url=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $option_url ]]; then
+				option_url="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ -z $option_url ]]; then
+		help "<url> is required"
+	fi
+
+	# =====================================
+	# Action
+
+	declare -A old_urls_to_new_url
+	old_urls_to_new_url['https://login.live.com']='https://account.microsoft.com'
+	old_urls_to_new_url['https://account.live.com']='https://account.microsoft.com'
+	old_urls_to_new_url['https://signin.ebay.com.au']='https://www.ebay.com.au/signin/'
+
+	function do_url_upgrade {
+		local url="$1" protocol result
+
+		# remove superfluous trailing slash
+		url="$(echo-regexp '([.][a-z]+)[/]$' '$1' -- "$url")"
+
+		# test the original url
+		protocol="$(get-url-protocol "$url" || :)"
+		if [[ -z $protocol ]]; then
+			# try http, which tries https first, otherwise fail
+			__print_style --stderr 'The url ' --variable-value={url} ' is missing its protocol, we will attempt to determine the missing protocol by testing variations...'
+			do_url_upgrade "http://$url"
+			return $?
+		elif [[ $protocol == 'https' ]]; then
+			# test original url works
+			if ! fetch --ok "$url"; then
+				__print_style --stderr 'The url ' --variable-value={url} ' is failing, we will try variations...'
+			fi
+		elif [[ $protocol == 'http' ]]; then
+			# try upgrade to https
+			result="${url//http\:/https\:}"
+			result="$(do_url_upgrade "$result")"
+			if [[ -n $result ]]; then
+				__print_lines "$result"
+				return 0
+			fi
+			result=''
+		else
+			__print_style --stderr 'The url ' --variable-value={url} ' has an invalid protocol, unable to upgrade.'
+			return 1
+		fi
+
+		# try removing www
+		result="${url//www./}"
+		if [[ $result != "$url" ]]; then
+			result="$(do_url_upgrade "$result")"
+			if [[ -n $result ]]; then
+				__print_lines "$result"
+				return 0
+			fi
+		fi
+		result=''
+
+		# test the url
+		if fetch --ok "$url"; then
+			# try removing login items
+			if echo-regexp -qi 'reg=|registration|verify|create|signup|signing|reset|token|join|register|logout|password|forgot|invitation|invite' -- "$url"; then
+				result="$(get-url-domain "$url")"
+				if [[ $result != "$url" ]]; then
+					result="$(do_url_upgrade "$result")"
+					if [[ -n $result ]]; then
+						__print_lines "$result"
+						return 0
+					fi
+				fi
+				result=''
+			fi
+			__print_lines "$url"
+			return 0
+		fi
+
+		# try removing path if ? is not present
+		if [[ $url != *'?'* ]]; then
+			result="$(get-url-domain "$url")"
+			if [[ $result != "$url" ]]; then
+				result="$(do_url_upgrade "$result")"
+				if [[ -n $result ]]; then
+					__print_lines "$result"
+					return 0
+				fi
+			fi
+			result=''
+		fi
+
+		# try removing path altogether
+		result="$(get-url-domain "$url")"
+		if [[ $result != "$url" ]]; then
+			result="$(do_url_upgrade"$result")"
+			if [[ -n $result ]]; then
+				__print_lines "$result"
+				return 0
+			fi
+		fi
+		result=''
+
+		# check if it is a replaced domain
+		if [[ -n $url && -v old_urls_to_new_url["$url"] ]]; then # avoids: bad array subscript
+			__print_lines "${old_urls_to_new_url["$url"]}"
+			return 0
+		fi
+
+		# unable to make https
+		__print_style --stderr 'The url ' --variable-value={url} ' is unresponsive.'
+		return 1
+	}
+
+	do_url_upgrade "$option_url"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	get_url_upgrade "$@"
+fi

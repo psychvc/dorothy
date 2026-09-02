@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+function echo_paths_and_basenames() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			For each argument, output the absolute path, as well as the basename.
+
+			USAGE:
+			echo-paths-and-basenames [...options] [--] ...<path>
+			echo-lines ...<path> | echo-paths-and-basenames [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			    mkdir -p -- ./temp/foo
+			    cd ./temp
+			    touch bar
+			    echo-paths-and-basenames -- foo bar
+			    # $(pwd)/foo
+			    # foo
+			    # $(pwd)/bar
+			    # bar
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function on_line {
+		fs-path --absolute -- "$1"
+		basename -- "$1"
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_paths_and_basenames "$@"
+fi

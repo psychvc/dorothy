@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# Remove old linux kernels
+# https://launchpad.net/linux-purge
+
+function setup_util_linux_purge() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='linux-purge'
+		"$@"
+		DOWNLOAD='https://git.launchpad.net/linux-purge/plain/linux-purge'
+	)
+	setup-util "${options[@]}"
+
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_linux_purge "$@"
+fi

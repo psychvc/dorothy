@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+function what_is_my_subnet() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Outputs your network subnet.
+
+			USAGE:
+			what-is-my-subnet
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Act
+
+	__command_required -- 'ip' || return $?
+
+	# `ip route show dev eth0` is too specific, doesn't work on vms among others
+	ip route show | echo-regexp -fon --regexp='(.+?/\d+?) dev e' --replace='$1'
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	what_is_my_subnet "$@"
+fi

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+# this command should have a --fallback (or be used with echo-trim-empty-lines), or a --quiet to suppress the error
+function echo_numeric() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Outputs inputs that are numbers, otherwise note their invalidity to stderr.
+			Using [is-number] for the validation.
+
+			USAGE:
+			echo-numeric [...options] [--] ...<input>
+			echo-lines ...<input> | echo-numeric [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-numeric -- 1 2
+
+			    1
+			    2
+			    # exit status: 0
+
+			echo-numeric -- 1 a ''
+
+			    1
+			    # exit status: 1
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	local had_an_invalid_input=no
+	function __on_piece {
+		if __is_number "$1"; then
+			__print_lines "$1" || return $?
+		else
+			had_an_invalid_input=yes
+		fi
+	}
+	function __on_finish {
+		if [[ $had_an_invalid_input == yes ]]; then
+			return 22 # EINVAL 22 Invalid argument
+		fi
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_numeric "$@"
+fi

@@ -1,0 +1,30 @@
+{
+  "editor.defaultFormatter": "trunk.io",
+  "[shellscript]": {
+    "editor.defaultFormatter": "trunk.io"
+  },
+  "[plaintext][markdown][mdx][python][pinescript]": {
+    "editor.insertSpaces": true,
+    "editor.useTabStops": false,
+    "editor.tabSize": 4
+  },
+  "[plaintext][markdown][mdx]": {
+    "editor.folding": false,
+    "editor.lineNumbers": "on",
+    "editor.minimap.enabled": false,
+    "editor.renderControlCharacters": true,
+    "editor.renderWhitespace": "boundary"
+  },
+  "editor.detectIndentation": false,
+  "editor.formatOnSave": true,
+  "editor.formatOnType": false,
+  "editor.inlineSuggest.enabled": true,
+  "editor.insertSpaces": false,
+  "editor.renderControlCharacters": true,
+  "editor.renderWhitespace": "all",
+  "editor.tabSize": 4,
+  "editor.useTabStops": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true
+}

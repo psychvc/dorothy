@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+function echo_verbose() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Quickly output inputs and their position.
+
+			USAGE:
+			echo-verbose [...options] [--] ...<input>
+			echo-lines ...<input> | echo-verbose [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-verbose -- a b c
+
+			    [0] = [a]
+			    [1] = [b]
+			    [2] = [c]
+
+			echo-lines -- a b c | echo-verbose --stdin
+
+			    [0] = [a]
+			    [1] = [b]
+			    [2] = [c]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	# on each input, update the position, and output
+	# @todo make the styles the same as `__dump` ?
+	local inputs=()
+	function __on_piece {
+		inputs+=("$1")
+	}
+	function __on_nothing {
+		__print_style --commentary-nothing-provided || return $?
+	}
+	function __on_finish {
+		__print_style --variable-value={inputs}
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_verbose "$@"
+fi

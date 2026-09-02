@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+
+# https://github.com/rfjakob/gocryptfs/blob/master/Documentation/MANPAGE.md
+
+function gocryptfs_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		__print_help "$@" <<-EOF || return $?
+			ABOUT:
+			Wrappers around \`gocryptfs\` to make things easier.
+
+			USAGE:
+			\`gocryptfs-helper <action>\`
+
+			ACTIONS:
+			new -- <vault>
+			    Creates a new vault at <vault> with the best algorithm for it.
+
+			compare -- <vault-one> <vault-two>
+			    Compares the features of two vaults, returning [0] if the same.
+
+			features -- <vault>
+			    Outputs the enabled feature flags of the \`gocryptfs\` vault.
+
+			info -- <vault>
+			    Prints information about \`gocryptfs\` version, speed, and vault information.
+
+			migrate -- <vault>
+			    Upgrades the \`gocryptfs\` vault to the best algorithm for it, this can take a while.
+
+			mount -- <vault> <mount-point> [--owner=<owner>] [--user=<user>] [--group=<group>]
+			    Mounts the vault at the <mount-point>.
+
+			unmount -- <mount-point>
+			    Unmounts the <mount-point>.
+
+			upgrade -- <vault>
+			    Upgrades the \`gocryptfs\` version.
+
+			version
+			    Prints the version of \`gocryptfs\`.
+
+			verify -- <vault> [--user=<user>] [--group=<group>]
+			    Verifies that the path is a \`gocryptfs\` vault.
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action='' option_args=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_args+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# ensure valid action
+	local actions=(
+		new
+		compare
+		features
+		info
+		migrate
+		mount
+		unmount
+		upgrade
+		verify
+		version
+	)
+	action="$(
+		choose --required \
+			--question='What action to perform?' \
+			--skip-default --default="$action" -- "${actions[@]}"
+	)"
+
+	# =====================================
+	# Dependencies
+
+	__command_required -- 'gocryptfs' || return $?
+
+	# =====================================
+	# Helpers
+
+	# -------------------------------------
+	# Minor Actions
+
+	function act_version {
+		gocryptfs --version | echo-regexp -o --regexp='20\d+-\d+-\d+'
+	}
+	function act_info {
+		local vault="${1-}"
+		eval-helper --verbose --wrap -- \
+			gocryptfs --speed # dumps version info
+		if [[ -n $vault ]]; then
+			eval-helper --verbose --wrap -- \
+				gocryptfs --info "$vault" # dumps vault info
+		fi
+	}
+	function act_verify {
+		# process
+		local item vault='' owner='' user='' group=''
+		while [[ $# -ne 0 ]]; do
+			item="$1"
+			shift
+			case "$item" in
+			'--help' | '-h') help ;;
+			'--user='*) user="${item#*=}" ;;
+			'--group='*) group="${item#*=}" ;;
+			'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+			*)
+				if [[ -z $vault ]]; then
+					vault="$item"
+				else
+					help 'An unrecognised argument was provided: ' --variable-value={item}
+				fi
+				;;
+			esac
+		done
+
+		# check
+		if is-file --user="$user" --group="$group" -- "$vault/gocryptfs.conf"; then
+			__print_style --code-good1="$vault" --good1=' is a gocryptfs vault'
+		else
+			__print_style --stderr --code-error1="$vault" --error1=' is not a gocryptfs vault'
+			return 1
+		fi
+	}
+	function act_features {
+		local vault="$1"
+		gocryptfs --info "$vault" | grep FeatureFlags
+	}
+	function act_compare {
+		local old_vault="$1" new_vault="$2" result=0
+		local old_vault_features new_vault_features
+		old_vault_features="$(
+			act_features "$old_vault"
+		)"
+		new_vault_features="$(
+			act_features "$new_vault"
+		)"
+
+		# compare the features
+		if [[ $old_vault_features == "$new_vault_features" ]]; then
+			__print_style --success="Vaults have the same features."
+			result=0
+		else
+			__print_style --warning="Vaults have different features."
+			result=1
+		fi
+		__print_style --element="$old_vault"
+		__print_lines "$old_vault_features"
+		__print_style --/element="$old_vault"
+		__print_style --element="$new_vault"
+		__print_lines "$new_vault_features"
+		__print_style --/element="$new_vault"
+		return "$result"
+	}
+	function act_upgrade {
+		setup-util-gocryptfs --upgrade
+	}
+	function act_mount {
+		# process
+		local item mount_source='' mount_target='' owner='' user='' group=''
+		while [[ $# -ne 0 ]]; do
+			item="$1"
+			shift
+			case "$item" in
+			'--help' | '-h') help ;;
+			'--owner='*) owner="${item#*=}" ;;
+			'--user='*) user="${item#*=}" ;;
+			'--group='*) group="${item#*=}" ;;
+			'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+			*)
+				if [[ -z $mount_source ]]; then
+					mount_source="$item"
+				elif [[ -z $mount_target ]]; then
+					mount_target="$item"
+				elif [[ -z $owner ]]; then
+					owner="$item"
+				else
+					help 'An unrecognised argument was provided: ' --variable-value={item}
+				fi
+				;;
+			esac
+		done
+
+		# check
+		if [[ -z $mount_source || -z $mount_target ]]; then
+			help "No <path>s provided."
+		fi
+
+		# construct command
+		local mount_cmd=() ls_cmd=()
+		if [[ -n $owner || -n $user || -n $group ]]; then
+			# https://github.com/rfjakob/gocryptfs/issues/638#issuecomment-1009578054
+			mount_cmd+=(eval-helper --elevate --user="$user" --group="$group" --)
+			ls_cmd+=(eval-helper --elevate --user="$user" --group="$group" --)
+		fi
+		mount_cmd+=(gocryptfs --rw --noprealloc --allow_other)
+		if [[ -n $owner ]]; then
+			mount_cmd+=(--force_owner "$owner")
+		fi
+		mount_cmd+=(
+			"$mount_source"
+			"$mount_target"
+		)
+		ls_cmd+=(ls -la "$mount_target")
+
+		# mount
+		__print_style --bold='Enter the cipher password for mounting:' --newline \
+			--code="$mount_source" --bold=' => ' --code="$mount_target"
+		eval-helper --verbose --wrap -- \
+			"${mount_cmd[@]}"
+		eval-helper --verbose --wrap -- \
+			"${ls_cmd[@]}"
+		if [[ -n $owner || -n $user || -n $group ]]; then
+			eval-helper --verbose --wrap -- \
+				fs-own --ug --owner="$owner" --user="$user" --group="$group" --recursive -- \
+				"$mount_target"
+		fi
+		__print_line
+	}
+
+	# -------------------------------------
+	# Init Action
+
+	function act_new {
+		local new_vault="$1" algorithm=''
+
+		# optional
+		if is-raspi; then
+			algorithm='xchacha'
+		fi
+		algorithm="$(
+			choose --no-confirm-default \
+				--question='Which algorithm to use for the new vault?' \
+				--label --default="$algorithm" -- aessiv 'AES-SIV (RFC5297) - Best for AES Hardware Acceleration' xchacha 'XChaCha20-Poly1305 — Best for Raspberry Pi'
+		)"
+
+		# create
+		if is-missing -- "$new_vault" || is-empty-directory -- "$new_vault"; then
+			__mkdirp "$new_vault"
+			__print_style --bold='Creating a new vault at ' --path="$new_vault" --bold=' with algorithm ' --variable-value={algorithm}
+			gocryptfs --init --"$algorithm" "$new_vault"
+		else
+			__print_error \
+				'Something already exists at ' --path="$new_vault" --newline \
+				--notice='Leaving for you to figure out.'
+			fs-structure -- "$new_vault" >&2
+			return 1
+		fi
+	}
+
+	# -------------------------------------
+	# Migrate Action
+
+	function act_migrate {
+		local old_vault="$1" verify_status compare_status root new_vault old_plain new_plain
+
+		# prepare temporary mount points
+		root="$(fs-temp --cache --directory='dorothy' --directory='gocryptfs-helper' --directory)"
+		new_vault="$(fs-temp --root="$root" --directory='new_vault')"
+		old_plain="$(fs-temp --root="$root" --directory='old_plain')"
+		new_plain="$(fs-temp --root="$root" --directory='new_plain')"
+
+		# ensure clean exit
+		if [[ $0 != "${BASH_SOURCE[0]}" ]]; then
+			__print_error --code='gocryptfs-helper migrate' ' requires being run as a command, not a function, such that cleanup always occurs, even on failures.'
+			return 1 # EPERM 1 Operation not permitted
+		fi
+		function on_gocryptfs_finish {
+			mount-helper --unmount --target="$old_plain" || :
+			mount-helper --unmount --target="$new_plain" || :
+			fs-remove --quiet --no-confirm-if-empty -- "$root" || :
+		}
+		trap on_gocryptfs_finish EXIT
+
+		# create
+		__print_line
+		__do --redirect-status={verify_status} -- act_verify "$new_vault"
+		if [[ $verify_status -eq 0 ]]; then
+			__print_style --notice='NOTICE: ' \
+				'The new vault ' --path="$new_vault" ' already exists...' --newline \
+				'This means a vault upgrade was started but not finished.' --newline \
+				'We will continue with this vault, if you wish setup a new one, remove the old one first.'
+		else
+			act_new "$new_vault"
+		fi
+		# gocryptfs --info "$new_vault"
+
+		# verify there is a difference
+		__try {compare_status} -- act_compare "$old_vault" "$new_vault"
+		if [[ $compare_status -eq 0 ]]; then
+			__print_style --stderr --error='Vault migration is nonsensical, as both vaults have the same features.'
+			return 1
+		fi
+
+		# mount
+		act_mount "$old_vault" "$old_plain"
+		act_mount "$new_vault" "$new_plain"
+
+		# migrate
+		fs-copy --remove --tool=rsync -- \
+			"${old_plain}/" \
+			"${new_plain}/"
+
+		# replace
+		__print_lines '' 'Prepping replacement:'
+		fs-remove --no-confirm -- "$old_plain/"
+		fs-structure -- "$new_plain/"
+		mount-helper -- \
+			--unmount --target="$old_plain" -- \
+			--unmount --target="$new_plain"
+		fs-structure -- "$old_vault" "$new_vault"
+		# @todo style with var_dump or something
+		__print_style --bold='Confirm the following replacement:' --newline \
+			--bold+red='Delete:' '  ' --code="$old_vault" --newline \
+			--bold+yellow='Move:' '    ' --code="$new_vault" --bold='  =>  ' --code="$old_vault"
+		if ! confirm --bool --ppid=$$ -- 'Proceed with replacement?'; then
+			return 1
+		fi
+		fs-remove --no-confirm -- "$old_vault"
+		eval-helper --elevate -- mv -v -- "$new_vault" "$old_vault"
+		# @todo style with var_dump or something
+		__print_style --bold='Replacement complete:' --newline \
+			--bold+red='Deleted:' '  ' --code="$old_vault" --newline \
+			--bold+yellow='Moved:' '    ' --code="$new_vault" --bold='  =>  ' --code="$old_vault"
+
+		# done
+		__print_style --success='Migration complete. ✅'
+	}
+
+	# =====================================
+	# Act
+
+	__affirm_function_is_defined "act_$action"
+	"act_$action" "${option_args[@]}" # eval
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	gocryptfs_helper "$@"
+fi

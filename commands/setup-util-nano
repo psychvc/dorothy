@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/nano/filelist
+# /bin/nano
+# /bin/rnano
+
+function setup_util_nano() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--name='GNU nano'
+		--cli='nano'
+		"$@"
+		APK='nano' # ALPINE
+		APT='nano' # UBUNTU
+		BREW='nano'
+	)
+	setup-util "${options[@]}"
+
+	# fix ubuntu server issue:
+	# Unable to create directory /home/ubuntu/.local/share/nano/: No such file or directory
+	# It is required for saving/loading search history or cursor positions.
+	__mkdirp "$XDG_DATA_HOME/nano"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_nano "$@"
+fi

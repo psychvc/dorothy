@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+function echo_html_decode_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local inputs=(
+		'Jack & Jill'
+		'Jack &amp; Jill'
+	)
+	# don't test &nbsp; as it gets converted into a special character
+	local expected_decode=$'Jack & Jill\nJack & Jill'
+	local tool all_tools=(deno php python3)
+
+	for tool in "${all_tools[@]}"; do
+		if __command_exists -- "$tool"; then
+			eval-tester --stdout="$expected_decode" -- \
+				echo-html-decode --tool="$tool" -- "${inputs[@]}"
+
+			{
+				__print_lines "${inputs[@]}"
+			} | eval-tester --stdout="$expected_decode" -- \
+				echo-html-decode --tool="$tool" --stdin
+		fi
+	done
+
+	return 0
+)
+function echo_html_decode() (
+	echo-html-coder --decode "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		echo_html_decode_test
+	else
+		echo_html_decode "$@"
+	fi
+fi

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+# https://www.flatpak.org/setup/Ubuntu/
+# https://wiki.manjaro.org/index.php/Flatpak
+
+# https://packages.debian.org/sid/amd64/flatpak/filelist
+# /usr/bin/flatpak
+
+function setup_util_flatpak() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-linux; then
+		__print_style --stderr --notice="[$0] is only intended to be run on Linux systems, skipping."
+		return 0
+	fi
+	if is-headless; then
+		__print_style --stderr --notice="[$0] is only intended to be run on desktop Linux systems, skipping."
+		return 0
+	fi
+
+	# setup flatpak
+	# despite docs, no apk
+	local options=(
+		--name='Flatpak'
+		--cli='flatpak'
+		"$@"
+		APT='flatpak'    # UBUNTU
+		AUR='flatpak'    # ARCH
+		RPM='flatpak'    # FEDORA
+		ZYPPER='flatpak' # SUSE
+	)
+	setup-util "${options[@]}"
+
+	# setup flatpak support for gnome-software (if it exists)
+	if is-apt && __command_exists -- gnome-software; then
+		options=(
+			--optional
+			--name='Flatpak via Gnome Software'
+			"$@"
+			APT='gnome-software-plugin-flatpak' # UBUNTU
+		)
+		setup-util "${options[@]}"
+	fi
+
+	# if installed, then configure
+	if __command_exists -- flatpak; then
+		# log start
+		__print_style --h2='Configure flatpak'
+
+		# install sources
+		eval-helper --elevate -- flatpak remote-add --if-not-exists flathub \
+			'https://flathub.org/repo/flathub.flatpakrepo'
+		# ^ sudo with flatpak avoids gui sudo prompt
+
+		# log success
+		__print_style --g2='Configure flatpak'
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_flatpak "$@"
+fi

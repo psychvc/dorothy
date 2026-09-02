@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+
+function get_app() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# @todo support linux systems, so [setup-util-1password] can detect successful install
+	local dirs=(
+		"$HOME/Applications"
+		'/Applications'
+		'/Applications/Setapp'
+		'/Applications/Utilities'
+		'/System/Applications'           # TextEdit
+		'/System/Applications/Utilities' # Terminal
+		'/System/Library/CoreServices'   # Finder
+	)
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the full path of a GUI application.
+
+			USAGE:
+			get-app [...options] [--] <app>
+
+			OPTIONS:
+			<app> | --app=<app> | --name=<app>
+			    The application name or path to get the full path of.
+
+			--no-quiet | --quiet
+			    If enabled, do not output the path of the application, and do not output any error messages.
+
+			--id | --output=id
+			    If enabled, on macos, output the bundle identifier of the application instead of the path.
+
+			QUIRKS:
+			Searches the following paths for the application:
+			$(__print_lines "${dirs[@]}")
+
+			If the application failed to resolve, it will not be outputted.
+			Only if it is impossible to detect whether the application is present, will a failure occur.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_apps=() option_quiet='' option_output=path
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		--help | -h) help ;;
+		--app=*) option_apps+=("${item#*=}") ;;
+		--name=*) option_apps+=("${item#*=}") ;;
+		--no-verbose* | --verbose*) __flag --source={item} --target={option_quiet} --non-affirmative ;;
+		--no-quiet* | --quiet*) __flag --source={item} --target={option_quiet} --affirmative ;;
+		--id | --output=id) option_output=id ;;
+		--path | --output=path) option_output=path ;;
+		--)
+			option_apps+=("$@")
+			shift $#
+			break
+			;;
+		--*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ ${#option_apps[@]} -eq 0 ]]; then
+				option_apps+=("$item")
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ ${#option_apps[@]} -eq 0 ]]; then
+		help 'No <app>s provided.'
+	fi
+
+	# =====================================
+	# Action
+
+	local name app dir path can_find was_found result
+	for name in "${option_apps[@]}"; do
+		if [[ -z $name ]]; then
+			return 1
+		fi
+		if is-mac; then
+			# ensure the name has .app appended
+			app="${name%.app}.app"
+
+			# iterate through the various locations
+			was_found='no'
+			for dir in "${dirs[@]}"; do
+				path="$dir/$app"
+				if [[ -d $path ]]; then
+					if [[ $option_output == 'id' ]]; then
+						# get the bundle identifier
+						result="$(defaults read "$path/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || :)"
+						if [[ -z $result ]]; then
+							continue
+						fi
+					else
+						result="$path"
+					fi
+					was_found='yes'
+					if [[ $option_quiet != 'yes' ]]; then
+						__print_lines "$result"
+					fi
+					continue
+				fi
+			done
+
+			# check if found
+			if [[ $was_found == 'yes' ]]; then
+				continue
+			fi
+			# wasn't found
+			return 1
+		elif is-windows; then
+			can_find='no'
+			if __command_exists -- winget.exe; then
+				can_find='yes'
+				# only output if found
+				local winget_status winget_stdout
+				__do --redirect-status={winget_status} --redirect-stdout={winget_stdout} -- winget.exe list --disable-interactivity "$name"
+				if [[ $winget_status -eq 0 ]]; then
+					if [[ $option_quiet != 'yes' ]]; then
+						echo-last-line --stdin <<<"$winget_stdout"
+					fi
+					continue
+				fi
+			fi
+			if __command_exists -- scoop; then
+				can_find='yes'
+				# check for the header of the table of results
+				local scoop_stdout
+				scoop_stdout="$(scoop list "$name" || :)"
+				if [[ $scroop_stdout == *'----'* ]]; then
+					if [[ $option_quiet != 'yes' ]]; then
+						echo-trim-padding -- "$scoop_stdout" | echo-last-line --stdin
+					fi
+					continue
+				fi
+			fi
+			if [[ $can_find == 'no' ]]; then
+				if [[ $option_quiet != 'yes' ]]; then
+					__print_error 'Unable to detect application ' --variable-value={name} ' on WSL. Install Winget or Scoop.'
+				fi
+				return 6 # ENXIO 6 Device not configured
+			fi
+			# wasn't found
+			return 1
+		elif is-headless; then
+			if [[ $option_quiet != 'yes' ]]; then
+				__print_style --stderr --notice 'Skipping detection of application ' --variable-value={name} ' on headless system.'
+			fi
+			return 19 # ENODEV 19 Operation not supported by device
+		else
+			if [[ $option_quiet != 'yes' ]]; then
+				__print_style --stderr --notice 'Unable to detect application ' --variable-value={name} ' on Linux. Submit a PR to support it.'
+			fi
+			return 19 # ENODEV 19 Operation not supported by device
+		fi
+	done
+	return 0
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	get_app "$@"
+fi

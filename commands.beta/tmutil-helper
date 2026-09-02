@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+function tmutil_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		__print_help "$@" <<-EOF || return $?
+			ABOUT:
+			Helpers for dealing with macOS Time Machine.
+
+			USAGE:
+			\`tmutil-helper <action>\`
+
+			ACTIONS:
+			evict
+			    Evict the macOS Time Machine cache.
+			    This is desirable when:
+			    - system has run out of storage
+			    - iCloud syncs are failing
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# =====================================
+	# Dependencies
+
+	# check
+	if ! is-mac; then
+		help "This command is only purposeful on macOS, which you are not running."
+	fi
+
+	# =====================================
+	# Actions
+
+	function evict {
+		local snapshot
+		while read -r snapshot; do
+			eval-helper --elevate -- tmutil deletelocalsnapshots "$snapshot"
+		done < <(tmutil listlocalsnapshotdates | grep --fixed-strings --regexp='-')
+	}
+
+	# =====================================
+	# Act
+
+	case "$action" in
+	'evict')
+		"$action"
+		;;
+	*)
+		help "Unknown action: $action"
+		;;
+	esac
+
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	tmutil_helper "$@"
+fi

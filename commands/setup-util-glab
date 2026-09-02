@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+# https://gitlab.com/gitlab-org/cli
+# https://gitlab.com/gitlab-org/cli#installation
+# https://gitlab.com/gitlab-org/cli/-/blob/main/docs/installation_options.md
+
+# https://packages.debian.org/sid/amd64/glab/filelist
+# /usr/bin/glab
+
+function setup_util_glab() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--name='GitLab CLI'
+		--cli=glab
+		"$@"
+		APK='glab' # ALPINE
+		APT='glab' # UBUNTU
+		AUR='glab' # ARCH
+		BREW='glab'
+		CHOCO='glab'
+		DOWNLOAD='https://j.mp/glab-cli'
+		RPM='glab' # FEDORA
+		NIX='nixos.glab'
+		PORT='glab'
+		SCOOP='glab'
+		SNAP_CHANNEL='edge'
+		SNAP='glab'
+		WINGET='glab.glab'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_glab "$@"
+fi

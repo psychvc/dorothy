@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+# https://github.com/cronitorio/cronitor-cli
+
+# https://github.com/cronitorio/cronitor-cli/releases
+# darwin_amd64.tar.gz
+# darwin_arm64.tar.gz
+# freebsd_amd64.tar.gz
+# freebsd_arm.tar.gz
+# freebsd_arm64.tar.gz
+# linux_amd64.tar.gz
+# linux_arm.tar.gz
+# linux_arm64.tar.gz
+# windows_amd64.zip
+
+function setup_util_cronitor() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# options
+	local option_reconfigure='yes'
+	__flag --target={option_reconfigure} --name='reconfigure' --affirmative --coerce -- "$@"
+
+	# helpers
+	function __reconfigure {
+		# if reconfigure is not desired, then don't reconfigure
+		if [[ $option_reconfigure == 'no' ]]; then
+			return 0
+		fi
+
+		# if xdg present, move it to a place sudo can access
+		# @todo add support for this directly to setup-util, so that uninstalls work properly
+		if [[ -x "$XDG_BIN_HOME/cronitor" ]]; then
+			if is-mac; then
+				fs-move --elevate -- "$XDG_BIN_HOME/cronitor" '/usr/local/bin/cronitor' || return $?
+			else
+				fs-move --elevate -- "$XDG_BIN_HOME/cronitor" '/usr/bin/cronitor' || return $?
+			fi
+		fi
+
+		# if installed, configure
+		if __command_exists -- cronitor; then
+			# authenticate if necessary
+			if ! cronitor status &>/dev/null; then
+				local token
+				token="$(
+					ask --required \
+						--question=$'What is your Cronitor API Key?\nYou get this from: https://cronitor.io/app/settings/api' \
+						--default="${CRONITOR_API_KEY-}"
+				)" || return $?
+				eval-helper --elevate -- cronitor configure --api-key "$token" >/dev/null || return $?
+			fi
+
+			# ensure sudo access
+			config-edit --local || return $?
+		fi
+	}
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=bandwhich "$@"; then
+		__reconfigure
+		return 0
+	fi
+
+	# determine options
+	local arch options=(
+		--cli='cronitor'
+		"$@"
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='cronitorio/cronitor-cli' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="$2"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option 'darwin_arm64.tar.gz' 'cronitor' || :
+		else
+			__add_download_option 'darwin_amd64.tar.gz' 'cronitor' || :
+		fi
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option 'linux_arm64.tar.gz' 'cronitor' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option 'linux_arm.tar.gz' 'cronitor' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option 'linux_amd64.tar.gz' 'cronitor' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option 'windows_amd64.zip' 'cronitor.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+
+	# finish
+	__reconfigure
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_cronitor "$@"
+fi

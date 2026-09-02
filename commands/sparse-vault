@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+
+function sparse_vault() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Helpers for working with macOS sparse vaults (encrypted DMGs).
+
+			USAGE:
+			sparse-vault mount|open <path>
+
+			    Mounts an existing sparse vault.
+
+			sparse-vault unmount|eject <path>
+
+			    Unmount an existing sparse vault.
+
+			sparse-vault create|make <path>
+			  [--name=...]  # Volume name
+			  [--size=...]  # Examples: MAXSIZE, 100g, 1t
+			  [--type=<sparseimage|sparsebundle>]
+
+			    Creates a new sparse vault.
+			    Note that the extension of ".<type>" appended onto the <path>.
+
+			    Use [--type=sparseimage] for a single file.
+			    Use [--type=sparsebundle] for a directory style file, made up of dozens of block files.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action='' option_path='' option_name='' option_size='' option_type=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'create' | 'make') action='create' ;;
+		'mount' | 'open') action='mount' ;;
+		'unmount' | 'eject') action='unmount' ;;
+		'--path='*) option_path="${item#*=}" ;;
+		'--name='*) option_name="${item#*=}" ;;
+		'--size='*) option_size="${item#*=}" ;;
+		'--type='*) option_type="${item#*=}" ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			elif [[ -z $option_path ]]; then
+				option_path="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# ensure valid action
+	local actions=(
+		'mount'
+		'unmount'
+		'create'
+	)
+	action="$(
+		choose --required \
+			--question='Which action to perform?' \
+			--skip-default --default="$action" -- "${actions[@]}"
+	)"
+
+	# adjustments: path
+	option_path="$(
+		ask --linger --required \
+			--question='Enter its path.' \
+			--default="$option_path"
+	)"
+	option_path="$(fs-path --absolute -- "$option_path")"
+
+	# adjustments: create
+	if [[ $action == 'create' ]]; then
+		option_name="$(
+			ask --linger --required --confirm \
+				--question='Enter the volume name.' \
+				--default="$option_name"
+		)"
+		option_size="$(
+			ask --linger --required --confirm \
+				--question='Enter its maximum size. E.g. MAXSIZE|100g|1t' \
+				--default="$option_size"
+		)"
+		option_type="$(
+			choose --linger --required \
+				--question='Enter its type.' \
+				--default="$option_type" -- sparseimage sparsebundle
+		)"
+	fi
+
+	# =====================================
+	# Helpers
+
+	function get_macos_version {
+		sw_vers -productVersion | echo-regexp -o '^\d+'
+	}
+
+	# =====================================
+	# Actions
+
+	function act_mount {
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold='Compacting...')" \
+			--success="$(__print_style --success='Compacted.')" \
+			--failure="$(__print_style --error='Failed to compact.')" -- \
+			hdiutil compact "$option_path"
+
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold='Mounting...')" \
+			--success="$(__print_style --success='Mounted.')" \
+			--failure="$(__print_style --error='Failed to mount.')" -- \
+			hdiutil mount "$option_path"
+	}
+
+	function act_create {
+		local args=(
+			'-encryption' 'AES-256'
+			'-size' "$option_size"
+			'-volname' "$option_name"
+		)
+		if [[ "$(get_macos_version)" -ge 13 ]]; then
+			args+=('-fs' 'APFS')
+		else
+			args+=('-fs' 'Journaled HFS+')
+		fi
+		if [[ $option_type == 'sparseimage' ]]; then
+			args+=('-type' 'SPARSE')
+			if [[ $option_path != *'.sparseimage' ]]; then
+				path="${path}.sparseimage"
+			fi
+		else
+			args+=('-type' 'SPARSEBUNDLE')
+			if [[ $option_path != *'.sparsebundle' ]]; then
+				path="${path}.sparsebundle"
+			fi
+		fi
+
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold='Creating...')" \
+			--success="$(__print_style --success='Created.')" \
+			--failure="$(__print_style --error='Failed to create.')" -- \
+			hdiutil create "${args[@]}" "$option_path"
+
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold='Mounting...')" \
+			--success="$(__print_style --success='Mounted.')" \
+			--failure="$(__print_style --error='Failed to mount.')" -- \
+			hdiutil mount "$option_path"
+	}
+
+	function act_unmount {
+		eval-helper --quiet --wrap \
+			--pending="$(__print_style --bold='Unmounting...')" \
+			--success="$(__print_style --success='Unmount.')" \
+			--failure="$(__print_style --error='Failed to unmount.')" -- \
+			hdiutil unmount "$option_path"
+	}
+
+	# =====================================
+	# Action
+
+	__affirm_function_is_defined "act_$action"
+	"act_$action" # eval
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	sparse_vault "$@"
+fi

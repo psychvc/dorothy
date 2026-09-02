@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+function echo_fstab_decode() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			fstab decode all input received.
+
+			USAGE:
+			echo-fstab-decode [...options] [--] ...<input>
+			echo-lines ...<input> | echo-fstab-decode [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLES:
+			echo-fstab-encode -- '|\040|\075|\054|\134|\043|'
+
+			    | |=|,|\|#|
+
+			echo-lines -- '|\040|\075|\054|\134|\043|' | echo-fstab-encode --stdin
+
+			    | |=|,|\|#|
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function __on_whole {
+		local string="$1" decoded_string=''
+
+		decoded_string="${string//\\040/ }"
+		decoded_string="${decoded_string//\\075/=}"
+		decoded_string="${decoded_string//\\054/,}"
+		decoded_string="${decoded_string//\\134/\\}"
+		decoded_string="${decoded_string//\\043/#}"
+
+		__print_piece "$decoded_string" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_fstab_decode "$@"
+fi

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+# https://github.com/XAMPPRocky/tokei
+# code stats, wc alternative
+
+# https://github.com/XAMPPRocky/tokei/releases
+# tokei-aarch64-unknown-linux-gnu.tar.gz
+# tokei-arm-linux-androideabi.tar.gz
+# tokei-arm-unknown-linux-gnueabi.tar.gz
+# tokei-armv7-linux-androideabi.tar.gz
+# tokei-armv7-unknown-linux-gnueabihf.tar.gz
+# tokei-i686-pc-windows-msvc.exe
+# tokei-i686-unknown-linux-gnu.tar.gz
+# tokei-i686-unknown-linux-musl.tar.gz
+# tokei-mips-unknown-linux-gnu.tar.gz
+# tokei-mips64-unknown-linux-gnuabi64.tar.gz
+# tokei-mips64el-unknown-linux-gnuabi64.tar.gz
+# tokei-mipsel-unknown-linux-gnu.tar.gz
+# tokei-powerpc64-unknown-linux-gnu.tar.gz
+# tokei-powerpc64le-unknown-linux-gnu.tar.gz
+# tokei-s390x-unknown-linux-gnu.tar.gz
+# tokei-sparcv9-sun-solaris.tar.gz
+# tokei-x86_64-apple-darwin.tar.gz
+# tokei-x86_64-pc-windows-msvc.exe
+# tokei-x86_64-unknown-linux-gnu.tar.gz
+# tokei-x86_64-unknown-linux-musl.tar.gz
+# tokei-x86_64-unknown-netbsd.tar.gz
+
+function setup_util_tokei() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=tokei "$@"; then
+		return 0
+	fi
+
+	# no apt
+	local arch options=(
+		--name='tokei'
+		--cli='tokei'
+		"$@"
+		APK='tokei' # ALPINE
+		AUR='tokei' # ARCH
+		BREW='tokei'
+		BSD='tokei'
+		CARGO='tokei'
+		CONDA_CHANNEL='conda-forge'
+		CONDA='tokei'
+		NIX='tokei'
+		PORT='tokei'
+		RPM='tokei' # FEDORA
+		SCOOP='tokei'
+		ZYPPER='tokei' # SUSE
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='XAMPPRocky/tokei' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="$2"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		__add_download_option '-x86_64-apple-darwin.tar.gz' 'tokei' || :
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '-aarch64-unknown-linux-gnu.tar.gz' 'tokei' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option '-arm-unknown-linux-gnueabi.tar.gz' 'tokei' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '-x86_64-unknown-linux-musl.tar.gz' 'tokei' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '-i686-unknown-linux-musl.tar.gz' 'tokei' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option '-x86_64-pc-windows-msvc.exe' '' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '-i686-pc-windows-msvc.exe' '' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_tokei "$@"
+fi

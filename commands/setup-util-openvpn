@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/openvpn/filelist
+# /usr/sbin/openvpn
+
+function setup_util_openvpn() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--name='OpenVPN'
+		--cli='openvpn'
+		"$@"
+		APT='openvpn' # UBUNTU
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_openvpn "$@"
+fi

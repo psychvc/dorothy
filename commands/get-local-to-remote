@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+# @todo this is used by `fs-copy` under special circumstances
+# add EXAMPLE for its actual use
+function get_local_to_remote() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			If the provided path a mount of a remote target,
+			get the remote equivalent of the mount.
+
+			USAGE:
+			get-local-to-remote <locally-mounted-path>
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_target=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $option_target ]]; then
+				option_target="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ -z $option_target ]]; then
+		help "<locally-mounted-path> is required"
+	fi
+	option_target="$(fs-path --resolve -- "$option_target")"
+
+	# =====================================
+	# Action
+
+	local remotes=() volume path server directory result=''
+	__split --target={remotes} --no-zero-length --invoke -- \
+		get-volumes --remote
+	if [[ ${#remotes[@]} -eq 0 ]]; then
+		help 'There were no remote volumes to convert ' --code="$option_target"
+	fi
+	# trunk-ignore(shellcheck/SC2034)
+	for remote in "${remotes[@]}"; do
+		local parts=()
+		__split --source={remote} --target={parts} --no-zero-length --delimiter=$'\t'
+		volume="${parts[0]}"s
+		path="$(echo-regexp --regexp="^$volume(.+)" --replace='$1' -- "$option_target")"
+		if [[ -n $path ]]; then
+			server="${parts[1]}"
+			directory="${parts[2]}"
+			result="$server:$directory$path"
+			break
+		fi
+	done
+
+	if [[ -n $result ]]; then
+		local example_result
+		example_result="$(echo-regexp --regexp='(.+)@(.+?)([.].+)?:(.+)' --replace='a-login-user@$2:/mnt$4' -- "$result")"
+		__print_style 'The local to remote conversion for ' --code="$option_target" ' will probably be something like these, but not these, as the username will be a local login username, and the mount point will be the local mount point rather than the remote mount point, as such, these are only suggestions to guide what the correct combination could be:' --newline \
+			--code="$result" --newline \
+			--code="$example_result"
+	else
+		return 1
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	get_local_to_remote "$@"
+fi

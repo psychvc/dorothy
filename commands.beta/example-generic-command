@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+function example_generic_command() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function __help {
+		cat <<-EOF >&2 || return $?
+			ABOUT:
+			Description of the command.
+
+			USAGE:
+			example-generic-command [...options] <single-argument> [-- ...<variable arguments>]
+
+			OPTIONS:
+			--boolean=[YES|no] | --no-boolean=[NO|yes]
+			    This flag is either yes or no. Defaults to yes.
+
+			--string=<value>
+			    Uses the value.
+
+			--multistring=<value>
+			    Adds the value to an array.
+
+			<first-argument>
+			    Accept a single argument, no more.
+
+			-- ...<multi-arguments>
+			    Adds each argument to an array.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@" || return $?
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	# trunk-ignore-all(shellcheck/SC2034)
+	local item option_boolean='' option_string='' option_multistring=() option_arg='' option_multiargs=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') __help || return $? ;;
+		'--no-boolean'* | '--boolean'*) __flag --source={item} --target={option_boolean} --affirmative --coerce || return $? ;;
+		'--string='*) option_string="${item#*=}" ;;
+		'--multistring='*) option_multistring+=("${item#*=}") ;;
+		'--')
+			option_multiargs+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) __help 'An unrecognised flag was provided: ' --variable-value={item} || return $? ;;
+		*)
+			if [[ -z $option_arg ]]; then
+				option_arg="$item"
+			else
+				__help 'An unrecognised argument was provided: ' --variable-value={item} || return $?
+			fi
+			;;
+		esac
+	done
+
+	# any modifications to the options go here
+	# ...
+
+	# =====================================
+	# Action
+
+	# ...
+	# your execution goes here
+
+	__dump {option_boolean} {option_string} {option_multistring} {option_arg} {option_multiargs} || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	example_generic_command "$@"
+fi

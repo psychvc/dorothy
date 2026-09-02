@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+function setup_system() (
+	source "$DOROTHY/sources/bash.bash"
+	source "$(type -P eval-helper)"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Configure the system to our expectations.
+
+			USAGE:
+			setup-system <install|update|clean>
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# assert action
+	if [[ -z $action ]]; then
+		help "No <action> provided."
+	fi
+	if [[ ! $action =~ ^(install|update|clean)$ ]]; then
+		help "Invalid <action> provided: $action"
+	fi
+
+	# generate log title
+	local action_title
+	action_title="$(__get_uppercase_first_letter -- "$action")"
+	action_title+=' System'
+
+	# =====================================
+	# Action
+
+	# log
+	__print_style --h1="$action_title"
+
+	# action
+	if [[ $action =~ ^(install|update)$ ]]; then
+		# pre-requisites
+		is-internet-working
+
+		# update dorothy
+		if confirm --linger --negative --ppid=$$ -- 'Update Dorothy?'; then
+			dorothy update
+		fi
+
+		# system
+		if is-mac; then
+			setup-mac "$action"
+		elif is-linux; then
+			setup-linux "$action"
+		fi
+
+		# ecosystem
+		# don't setup-dns, as it can cause issues on fragile environments
+		# let users call it themselves
+		setup-git "$action"
+		setup-rust "$action"
+		setup-node "$action"
+		setup-go "$action"
+		setup-ruby "$action"
+		setup-python "$action"
+		setup-bin
+		setup-utils
+
+		# extras
+		if [[ $action == 'install' ]]; then
+			if is-mac; then
+				# mac restore
+				if confirm --linger --bool --ppid=$$ -- 'Would you like restore from backup?'; then
+					setup-mac restore
+				fi
+
+				# mac settings
+				if confirm --linger --bool --ppid=$$ -- 'Would you like configure macOS settings?'; then
+					setup-mac settings
+				fi
+			elif is-linux; then
+				# linux fonts
+				setup-linux fonts
+			fi
+
+			# shell
+			setup-shell
+		fi
+	fi
+
+	# clean
+	function clean_dirs {
+		local caches recreate
+		caches=(
+			"$HOME/Library/Application Support/Plex Media Server/Updates"
+			"$HOME/Library/Application Support/Spotify/PersistentCache/Update"
+			"$XDG_CACHE_HOME"
+		)
+		recreate=(
+			"$XDG_CACHE_HOME"
+			# "$XDG_CACHE_HOME/gems"
+			# "$XDG_CACHE_HOME/pip/http"
+		)
+		fs-remove --quiet --no-confirm --elevate -- "${caches[@]}" || :
+		__mkdirp "${recreate[@]}"
+	}
+	eval_helper --quiet --wrap --shapeshifter \
+		--pending="$(__print_style --bold="Cleaning directory caches...")" \
+		--success="$(__print_style --success="Cleaned directory caches.")" \
+		--failure="$(__print_style --error="Failed to clean directory caches.")" -- \
+		clean_dirs
+
+	# npm
+	if __command_exists -- npm; then
+		eval_helper --quiet --wrap --shapeshifter \
+			--pending="$(__print_style --bold="Cleaning npm...")" \
+			--success="$(__print_style --success="Cleaned npm.")" \
+			--failure="$(__print_style --error="Failed to clean npm.")" -- \
+			nvm-env -- npm cache clean --force || :
+	fi
+
+	# operating system
+	if is-mac; then
+		setup-mac clean
+	elif is-linux; then
+		setup-linux clean
+	fi
+
+	# log
+	__print_style --g1="$action_title"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_system "$@"
+fi

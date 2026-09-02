@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+function geocode_() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Geocodes a location to coordinates using the Mapbox API:
+			https://docs.mapbox.com/help/getting-started/geocoding/
+
+			USAGE:
+			geocode [--token=...] [--location=...]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item token='' location=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--token='*) token="${item#*=}" ;;
+		'--location='*) location="${item#*=}" ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# ensure
+	token="$(
+		ask --required \
+			--question='What is your Mapbox Access Token?' \
+			--default="$token"
+	)"
+	location="$(
+		ask --required \
+			--question='What is the location to geocode?' \
+			--default="$location"
+	)"
+
+	# =====================================
+	# Action
+
+	fetch "https://api.mapbox.com/geocoding/v5/mapbox.places/$location.json?access_token=$token"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	geocode_ "$@"
+fi

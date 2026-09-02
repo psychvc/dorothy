@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+function mac_address_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Helpers for working with your MAC address.
+
+			USAGE:
+			mac-address-helper <action>
+
+			ACTION:
+			new
+			    Generate a new MAC address.
+
+			apply <interface> <mac>
+			    Apply the specified MAC address <mac> to the specified network interface <interface>.
+
+			get <interface>
+			    Get the MAC address of the specified network interface <interface>.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action='' option_args=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		--help | -h) help ;;
+		--*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		new | apply | get)
+			action="$item"
+			option_args+=("$@")
+			shift $#
+			break
+			;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	function act_new {
+		# see the [git history] for this file for a non [echo-regexp] solution
+		openssl rand -hex 6 | echo-regexp -g '(..)' '$1:' | echo-regexp ':$' ''
+	}
+	function act_apply {
+		local interface="${1-}" mac="${2-}"
+		if [[ -z $interface ]]; then
+			help '<interface> was missing for: ' --code='mac-address-helper apply <interface> <mac>' $'\n' 'Typically ' --code='en0' ' or ' --code='p2p0' ' is used.'
+		fi
+		if [[ -z $mac ]]; then
+			help '<mac> was missing for: ' --code='mac-address-helper apply <interface> <mac>' $'\n' 'You can generate one using: ' --code='mac-address-helper new'
+		fi
+		eval-helper --elevate -- /System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport --disassociate
+		eval-helper --elevate -- ifconfig "$interface" ether "$mac"
+		eval-helper --elevate -- ifconfig "$interface" down || :
+		eval-helper --elevate -- ifconfig "$interface" up || :
+		networksetup -detectnewhardware
+	}
+	function act_get {
+		local interface="${1-}"
+		if [[ -z $interface ]]; then
+			help '<interface> was missing for: ' --code='mac-address-helper get <interface>' $'\n' 'Typically ' --code='en0' ' or ' --code='p2p0' ' is used.'
+		fi
+		eval-helper --elevate -- ifconfig "$interface" ether | echo-regexp -fon --regexp='ether ([\w\d:]+)' --replace='$1'
+	}
+
+	# =====================================
+	# Act
+
+	__affirm_function_is_defined act_"$action"
+	"act_$action" "${option_args[@]}" # eval
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	mac_address_helper "$@"
+fi

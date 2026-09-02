@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+function what_is_listening() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Discover and display information about network services that are actively listening for incoming connections.
+
+			USAGE:
+			what-is-listening [dns|everything]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_type=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'dns' | 'everything') option_type="$item" ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# ask
+	option_type="$(
+		choose \
+			--question='What do you want to check for?' \
+			--skip-default --default="$option_type" -- dns everything
+	)"
+
+	# =====================================
+	# Dependencies
+
+	# =====================================
+	# Act
+
+	# fetch
+	if [[ $option_type == 'dns' ]]; then
+		# check
+		if __command_missing -- 'ss'; then
+			__print_error '[ss] command is required to check what is listening to only DNS'
+			return 19 #  ENODEV 19 Operation not supported by device
+		fi
+		# what is listening on dns port 53
+		eval-helper --elevate -- ss -lp 'sport = :domain'
+	else
+		__command_required -- 'netstat' || return $?
+		eval-helper --elevate -- netstat -tunl
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	what_is_listening "$@"
+fi

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+function setup_util_apple_rosetta() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-mac || ! is-apple-silicon; then
+		if ! get-terminal-quiet-support --quiet -- "$@"; then
+			__print_style --stderr --notice="[$0] is only intended to be run on Apple Silicon macOS systems, skipping." || return $?
+		fi
+		return 0
+	fi
+
+	# =====================================
+	# Action
+
+	# while not installed
+	while [[ ! -f '/Library/Apple/usr/share/rosetta/rosetta' ]]; do
+		# attempt install
+		eval-helper --elevate -- softwareupdate --install-rosetta --agree-to-license || return $?
+	done
+
+	# success
+	return 0
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_apple_rosetta "$@"
+fi

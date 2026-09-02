@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+function is_empty_value_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	eval-tester --name='no args' --status=22 --ignore-stderr -- \
+		is-empty-value --
+
+	eval-tester --name='a single empty string is empty' --status= -- \
+		is-empty-value -- ''
+
+	eval-tester --name='empty values are empty' -- \
+		is-empty-value -- '' ' ' $'\t' $'\n' $' \t\n' null NULL void VOID undefined UNDEFINED
+
+	eval-tester --name='any non-empty values is standard failure' --status=1 -- \
+		is-empty-value -- '' ' null'
+
+	eval-tester --name='any non-empty values is standard failure' --status=1 -- \
+		is-empty-value -- '>'
+
+	return 0
+)
+function is_empty_value() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Check if the input is an empty value.
+			Companion to [is-value], [echo-values]. Equivalent to a [is-nullish].
+
+			USAGE:
+			is-empty-value  [...options] [--] <input>
+
+			OPTIONS:
+			<input> | --value=<input>
+			    Verify this <input> is an empty value
+
+			RETURNS:
+			[0] if all <input>s are empty values
+			[1] if any <input>s are not empty values
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_inputs=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--value='*) option_inputs+=("${item#*=}") ;;
+		'--')
+			option_inputs+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_inputs+=("$item") ;;
+		esac
+	done
+
+	# verify
+	if [[ ${#option_inputs[@]} -eq 0 ]]; then
+		help 'No <input>s provided.'
+	fi
+
+	# process
+	local value
+	for value in "${option_inputs[@]}"; do
+		# check for empty values, including empty string and all whitespace
+		if [[ $value =~ ^([[:space:]]*|null|NULL|void|VOID|undefined|UNDEFINED)$ ]]; then
+			: # all good, continue
+		else
+			return 1 # not good
+		fi
+	done
+	return 0
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		is_empty_value_test
+	else
+		is_empty_value "$@"
+	fi
+fi

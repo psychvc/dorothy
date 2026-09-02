@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+# snap is amd64 only
+# flatpak is stale, without access to liveshare dependencies, the `flatpak` executable, the `code` executable
+
+# https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal # zip
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-armhf
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-x64
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-arm64
+# https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-armhf
+
+function setup_util_vscode() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# cleanup our `code` alias that we add later
+	fs-remove --quiet --no-confirm -- "$XDG_BIN_HOME/code"
+
+	# determine the options
+	local arch options=(
+		--name='Visual Studio Code'
+		--cli=code
+		"$@"
+		AUR='visual-studio-code-bin' # ARCH
+		CASK='visual-studio-code'
+		FLATPAK='com.visualstudio.code'
+		NIX='vscode'
+		SNAP='code --classic'
+	)
+	if is-mac; then
+		options+=(
+			DOWNLOAD='https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal'
+			DOWNLOAD_ARCHIVE_EXTRACT='yes'
+			DOWNLOAD_FILENAME='Visual Studio Code.app'
+		)
+	elif is-linux; then
+		arch="$(get-arch)"
+		if [[ $arch == 'a64' ]]; then
+			options+=(
+				DEB='https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64'
+				RPM='https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-arm64' # FEDORA
+			)
+		elif [[ $arch == 'a32' ]]; then
+			options+=(
+				DEB='https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-armhf'
+				RPM='https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-armhf' # FEDORA
+			)
+		elif [[ $arch == 'x64' ]]; then
+			options+=(
+				DEB='https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64'
+				RPM='https://code.visualstudio.com/sha/download?build=stable&os=linux-rpm-x64' # FEDORA
+			)
+		fi
+	fi
+
+	# dependencies
+	if is-linux; then
+		# https://docs.microsoft.com/en-us/visualstudio/liveshare/reference/linux#install-linux-prerequisites
+		# optional as currently not completely supported on ubuntu 22.04
+		# `__print_line |` to skip the `Press enter to dismiss this message' prompt
+		__print_line | setup-util --name='Visual Studio Code: Linux Dependencies' --optional "$@" \
+			INSTALLER='https://aka.ms/vsls-linux-prereq-script'
+	fi
+
+	# install
+	setup-util "${options[@]}"
+
+	# ensure `code` is available
+	setup-bin
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_vscode "$@"
+fi

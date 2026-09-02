@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# https://www.gnu.org/software/emacs/
+# https://github.com/emacs-mirror/emacs
+
+# https://packages.debian.org/sid/amd64/emacs/filelist (no bins...)
+
+function setup_util_emacs() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# no apk
+	local options=(
+		--name='GNU Emacs'
+		--cli='emacs'
+		"$@"
+		APT='emacs' # UBUNTU
+		CASK='emacs'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_emacs "$@"
+fi

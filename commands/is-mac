@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+function is_mac_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local os
+	os="$(uname -s)"
+	if [[ $os == 'Darwin' ]]; then
+		eval-tester --name='is mac' --status='0' -- \
+			is-mac
+	else
+		eval-tester --name='is not mac' --status='1' -- \
+			is-mac
+	fi
+
+	return 0
+)
+function is_mac() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Checks if the system is nacOS.
+
+			USAGE:
+			is-mac
+
+			RETURNS:
+			[0] if the system is nacOS
+			[1] if the system is not nacOS
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# Bash already provides OSTYPE, so need to do these:
+	# "$(uname -s)" == 'Darwin'
+	# "$(uname -o)" == 'Darwin'
+
+	# https://www.gnu.org/software/bash/manual/bash.html#index-OSTYPE
+	# OSTYPE: Automatically set to a string that describes the operating system on which bash is executing.  The default is system-dependent.
+	if [[ $OSTYPE == darwin* ]]; then
+		return 0
+	else
+		return 1
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		is_mac_test
+	else
+		is_mac "$@"
+	fi
+fi

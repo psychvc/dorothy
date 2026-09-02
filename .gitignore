@@ -1,0 +1,15 @@
+# generic
+**/.DS_Store
+node_modules
+package-lock.json
+basic.vim
+
+# unused trunk defaults
+.trunk/*
+!.trunk/trunk.yaml
+!.trunk/configs
+
+# custom to dorothy
+user
+state
+fixtures/

@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+function setup_mac() (
+	source "$DOROTHY/sources/bash.bash"
+	source "$DOROTHY/sources/environment.sh"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Configure macOS to our expectations.
+
+			USAGE:
+			setup-mac <install|update>
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# assert compatibility
+	if ! is-mac; then
+		help 'This command is only purposeful on macOS, which you are not running.'
+	fi
+
+	# assert action
+	if [[ -z $action ]]; then
+		help "No action provided."
+	fi
+
+	# generate log title
+	local action_title
+	action_title="$(__get_uppercase_first_letter -- "$action")"
+	action_title+=' macOS'
+
+	# =====================================
+	# Action
+
+	# action
+	if [[ $action == 'clean' ]]; then
+		setup-mac-brew clean
+	elif [[ $action =~ ^(install|update)$ ]]; then
+		# log
+		__print_style --h1="$action_title" || return $?
+
+		# reassert minimal apple dependencies
+		setup-util-apple-rosetta
+		setup-util-apple-cli-tools
+
+		# essentials
+		setup-mac-brew "$action"
+		# ^ setup-util-devel done as part of this
+
+		# install and upgrade mac app store apps
+		if [[ $action == 'install' ]]; then
+			setup-mac-appstore --install --upgrade
+		else
+			setup-mac-appstore --upgrade
+		fi
+
+		# log
+		__print_style --g1="$action_title" || return $?
+	else
+		# unknown action
+		help "An unrecognised action was provided: $action"
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_mac "$@"
+fi

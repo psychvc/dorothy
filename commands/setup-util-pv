@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/pv/filelist
+# /usr/bin/pv
+
+function setup_util_pv() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='pv'
+		"$@"
+		APT='pv' # UBUNTU
+		BREW='pv'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_pv "$@"
+fi

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+# @todo add help, and add obs
+
+function is_streaming() (
+	source "$DOROTHY/sources/bash.bash"
+
+	[[ "$(osascript -e 'tell application "System Events" to (name of processes) contains "Twitch Studio"')" == 'true' ]] || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	is_streaming "$@"
+fi

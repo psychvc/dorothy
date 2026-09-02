@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+function macos_drive() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Guides you through creating a macOS installation media.
+
+			USAGE:
+			macos-drive
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# helpers
+	local installer name volume confirm_status
+	function choose_volume {
+		choose --linger --confirm --required \
+			--question="Install $name to which volume?" -- \
+			/Volumes/*
+	}
+	function confirm_installation {
+		confirm --linger --bool --ppid=$$ -- "Confirm installation of $name to $volume?"
+	}
+	function do_installation {
+		eval-helper --elevate -- "$installer/Contents/Resources/createinstallmedia" --volume "$volume"
+	}
+
+	# select the installer
+	installer="$(macos-installer)"
+	name="$(basename -- "$installer")"
+	volume="$(choose_volume)"
+	__try {confirm_status} -- confirm_installation
+	if [[ $confirm_status -eq 0 ]]; then
+		do_installation
+	else
+		return 125 # ECANCELED 125 Operation cancelled
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	macos_drive "$@"
+fi

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# https://wslutiliti.es/wslu/
+# https://wslutiliti.es/wslu/install.html
+
+function setup_util_wslu() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	# @todo figure out installers for other platforms
+	local options=(
+		--name='wslu'
+		--cli='wslview'
+		"$@"
+		APK='wslu' # ALPINE
+		APT_REPO='ppa:wslutilities/wslu'
+		APT='wslu' # UBUNTU
+		BREW='wslu'
+		YUM='wslu' # FEDORA
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_wslu "$@"
+fi

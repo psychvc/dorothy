@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+function is_group() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Checks if a <group> is registered as a group on the system.
+
+			USAGE:
+			is-group [...options] [--] <group>
+
+			OPTIONS:
+			--group=<group> | --groups=<groups> | ...<group>
+			    Groups to verify exist on this system.
+
+			RETURNS:
+			[0] if all <group>s are a group on the system.
+			[1] if any <group>s are not a group on the system.
+			[19] if the OS is not supported.
+
+			COMPANION COMMANDS:
+			[get-group-id]
+			[get-profile]
+			[get-user-id]
+			[is-admin]
+			[is-group]
+			[is-owner]
+			[is-password-usable]
+			[is-root]
+			[is-user-in-group]
+			[is-user]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_groups=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--group='* | '--groups='*) __split --target={option_groups} --append --delimiters=$'\n\t ,|' --no-zero-length -- "${item#*=}" ;;
+		'--')
+			option_groups+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_groups+=("$item") ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# https://stackoverflow.com/a/36131231/130638
+	# https://superuser.com/a/444218/32418
+	local group
+	for group in "${option_groups[@]}"; do
+		if __command_exists -- getent; then
+			getent group "$group" &>/dev/null
+		elif __command_exists -- dscl; then
+			dscl . -read "/Groups/$group" &>/dev/null
+		elif __command_exists -- dscacheutil; then
+			{
+				dscacheutil -q group -a name "$group" | echo-or-fail --stdin
+			} &>/dev/null
+		else
+			__print_error "$0: Unsupported OS"
+			return 19 # ENODEV 19 Operation not supported by device
+		fi
+	done
+	return 0
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	is_group "$@"
+fi

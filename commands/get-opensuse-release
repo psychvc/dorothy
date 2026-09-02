@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+function get_opensuse_release() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the release identifier of the openSUSE system.
+
+			USAGE:
+			get-opensuse-release
+
+			QUIRKS:
+			Returns [1] if not openSUSE, or if the check failed.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	if is-opensuse && [[ -f /etc/os-release ]]; then
+		# see git history for this file for a non [echo-regexp] solution
+		echo-regexp -fongm '^\s*(NAME|VERSION)="*(.+?)"*$' '$2' </etc/os-release | echo-regexp -g '[_\s\n]+' '_'
+		return $?
+	else
+		return 1
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	get_opensuse_release "$@"
+fi

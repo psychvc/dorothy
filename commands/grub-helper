@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+function grub_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# assert compatibility
+	if ! is-linux; then
+		__print_style --stderr --notice="[$0] is only intended to be run on Linux systems, skipping."
+		return 0
+	fi
+	if is-windows; then
+		__print_style --stderr --notice="[$0] is not applicable on Windows, skipping."
+		return 0
+	fi
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Refresh the GRUB cache, such that changes will be loaded on the next boot.
+
+			USAGE:
+			grub-helper
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Act
+
+	if is-ubuntu; then
+		# https://pkgs.org/download/grub2-common
+		# ubuntu requires a special package for it to actually work
+		setup-util --name='Grub Utilities' --quiet \
+			APT='grub2-common' # UBUNTU
+		eval-helper --elevate -- update-grub
+	elif __command_exists -- update-grub; then
+		# manjaro
+		eval-helper --elevate -- update-grub
+	elif __command_exists -- grub-mkconfig:; then
+		# https://itsfoss.com/update-grub/
+		# this can have errors, so prefer update-grub
+		eval-helper --elevate -- grub-mkconfig -o /boot/grub/grub.cfg
+	elif is-linux; then
+		# fedora uses grubby it seems, as grub2-common doesn't provide update-grub on fedora
+		__print_style --stderr --error='Your Linux distribution is currently unsupported.'
+		return 46 # EPFNOSUPPORT 46 Protocol family not supported
+	else
+		__print_style --stderr --error='This command is only intended for Linux distributions that use GRUB.'
+		return 45 # ENOTSUP 45 Operation not supported
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	grub_helper "$@"
+fi

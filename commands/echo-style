@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+# @todo
+# redo this command to only reset what was necessary, so that this works:
+# echo-style --blink '(' --green+bold='Y' '/n)')
+
+# @todo
+# support `quiet` and `verbose` styles that default to the value of `get-terminal-quiet-support`
+
+# @todo
+# consolidate into a `__print_style` function that lives in `sources/styles.bash` and eliminate all external command calls, or cache them, to improve performance
+
+function echo_style() (
+	source "$DOROTHY/sources/bash.bash"
+
+	function __help {
+		cat <<-EOF >&2
+			USAGE:
+
+			echo-style [...options] [--!style] [--!style+!style] value [--!style=value] [--!style+!style=value]
+
+			OPTIONS:
+			--no-trail
+			    Disables outputting a trailing newline.
+
+			--color | --colors | --colors=yes
+			    Enables styles.
+
+			--no-color | --no-colors | --colors=no
+			    Disables styles.
+
+			EXAMPLES:
+
+			echo-style --bold --blue 'this is bold and blue' 'so is this' --yellow ' but this is bold and yellow'
+			echo-style --bg-red+hi-white='this is very bad' --green+bold=' while this is good'
+
+			STYLES:
+
+			Colors: black, red, green, yellow, blue, magenta, cyan, white
+			Modifiers: background_*, intense_*, background_intense_*
+			Modifier aliases: bg-*, fg-*
+			Modes: reset, bold, dim, underline, blink, invert
+			Targets: nocolor, color, stdout, stderr, tty: these must have <value>
+			Special: h1, e1, g1, header, error
+
+			QUIRKS:
+
+			Hyphens (-) in style names are converted to underscores (_).
+
+			If [env NO_COLOR=yes] or [env COLOR=no], [--no-color[s]/--color[s]=no] then styles will be omitted.
+
+			Use [--multicolor=<value>] to indicate the value should only be outputted if colors are.
+
+			Use [--monocolor=<value>] to indicate the value should only be outputted if colors are not.
+
+			value="\$(echo-style --bold='first' --monocolor=' ' --color+dim=' → ' --bold='second')"; printf '%s\n' "\$value"
+			# outputs with colors: first → second
+
+			value="\$(env NO_COLOR=yes echo-style --bold='first' --monocolor=' ' --color+dim=' → ' --bold='second')"; printf '%s\n' "\$value"
+			# outputs without colors: first second
+
+			EXPLANATION:
+
+			[--style=value] will apply the style only to that value.
+			[--style value value] will apply the style to all subsequent values, until [--reset] is provided.
+			[--blue --bold value] will make value be blue and bold.
+
+			TIPS:
+
+			[-n] at the start to avoid printing the trailing newline
+			[--h1=value] for segment headers
+			[--e1=value] for segment failure footers
+			[--g1=value] for segment success footers
+			[--error=value] for unexpected errors
+			[--header] for general headers
+			[--dim] for quoting
+
+			Remember [\$'\n'] is available to you to place newlines between arguments, e.g.
+			echo-style value \$'\n' value
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	if [[ $* == '--help' ]]; then
+		__help || return $?
+	else
+		__print_style "$@" || return $?
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_style "$@"
+fi

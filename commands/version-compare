@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+# @todo rewrite arg passing, adopting modern help conventions
+
+# https://github.com/bevry/version-compare/blob/76f92ccde39e05a4af147eac293fe6b6743c9b73/source/index.ts
+# MIT License - 2020+ Benjamin Lupton <b@lupton.cc> (https://balupton.com)
+
+function version_compare() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Compare two version numbers.
+
+			USAGE:
+			version-compare <current> <other>
+
+			OUTPUTS:
+			[-1]   if <current> is less than <other>
+			[0]    if <current> is equal to <other>
+			[1]    if <current> is greater than <other>
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_current='' option_other=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $option_current ]]; then
+				option_current="$item"
+			elif [[ -z $option_other ]]; then
+				option_other="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ -z $option_current ]]; then
+		help "No <current> version was provided"
+	fi
+	if [[ -z $option_other ]]; then
+		help "No <other> version was provided"
+	fi
+
+	# =====================================
+	# Act
+
+	local current_parts=() other_parts=()
+	__split --source={option_current} --target={current_parts} --no-zero-length --delimiter='.'
+	__split --source={option_other} --target={other_parts} --no-zero-length --delimiter='.'
+
+	local current_parts_count other_parts_count shared_parts_count
+	current_parts_count="${#current_parts[@]}"
+	other_parts_count="${#other_parts[@]}"
+	shared_parts_count="$(get-min -- "$current_parts_count" "$other_parts_count")"
+
+	local current_depth current_part other_part
+	for ((current_depth = 0; "$current_depth" < "$shared_parts_count"; current_depth++)); do
+		current_part="${current_parts[current_depth]:-0}"
+		other_part="${other_parts[current_depth]:-0}"
+		if [[ $current_part -gt $other_part ]]; then
+			__print_lines '1' # greater than
+			return 0
+		fi
+		if [[ $other_part -gt $current_part ]]; then
+			__print_lines '-1' # less than
+			return 0
+		fi
+	done
+
+	__print_lines '0' # equal
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	version_compare "$@"
+fi

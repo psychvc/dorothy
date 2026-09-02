@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/net-tools/filelist
+# /bin/netstat
+# /sbin/ifconfig
+# /sbin/ipmaddr
+# /sbin/iptunnel
+# /sbin/mii-tool
+# /sbin/nameif
+# /sbin/plipconfig
+# /sbin/rarp
+# /sbin/route
+# /sbin/slattach
+
+function setup_util_netstat() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='netstat'
+		"$@"
+		APK='net-tools' # ALPINE
+		APT='net-tools' # UBUNTU
+		AUR='net-tools' # ARCH
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_netstat "$@"
+fi

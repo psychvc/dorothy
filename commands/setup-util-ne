@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# https://github.com/vigna/ne
+# https://github.com/vigna/ne/blob/master/INSTALL.md
+
+# https://github.com/vigna/ne/releases
+# no releases
+
+# https://packages.debian.org/sid/amd64/ne/filelist
+# /usr/bin/ne
+
+function setup_util_ne() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# no apk
+	local options=(
+		--name='ne, the nice editor'
+		--cli='ne'
+		"$@"
+		APT='ne' # UBUNTU
+		BREW='ne'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_ne "$@"
+fi

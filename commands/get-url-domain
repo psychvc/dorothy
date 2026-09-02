@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+function get_url_domain_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	eval-tester --name='ok using arguments' --stdout='https://bevry.me' -- \
+		get-url-domain -- 'https://bevry.me/path?query'
+
+	{
+		printf '%s' 'https://bevry.me/path?query'
+	} | eval-tester --name='ok using stdin' --stdout='https://bevry.me' -- \
+		get-url-domain --stdin
+
+	eval-tester --name='not ok using arguments' --ignore-stderr --status=1 -- \
+		get-url-domain -- 'bevry.me'
+
+	{
+		printf '%s' 'bevry.me'
+	} | eval-tester --name='not ok using stdin' --ignore-stderr --status=1 -- \
+		get-url-domain --stdin
+
+	return 0
+)
+function get_url_domain() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the domain of URL
+
+			USAGE:
+			get-url-domain [...options] [--] ...<input>
+			echo-lines ...<input> | get-url-domain [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			get-url-domain -- 'https://bevry.me/path?query'
+
+			    https://bevry.me
+			    # exit status: 0
+
+			printf '%s' 'https://bevry.me/path?query' | get-url-domain --stdin
+
+			    https://bevry.me
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	local deno_script
+	deno_script="$(type -P 'get-url-domain.ts')"
+
+	function __on_piece {
+		"$deno_script" "$1" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		get_url_domain_test
+	else
+		get_url_domain "$@"
+	fi
+fi

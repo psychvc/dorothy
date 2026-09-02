@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+function echo_trim_zero_length_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local inputs=('a' '' 'b' ' ' 'c' 'null' 'd' 'false')
+	local expected=$'a\nb\n \nc\nnull\nd\nfalse'
+
+	eval-tester --name='trimming arguments' --stdout="$expected" -- \
+		echo-trim-zero-length -- "${inputs[@]}"
+
+	{
+		__print_lines "${inputs[@]}"
+	} | eval-tester --name='trimming arguments' --stdout="$expected" -- \
+		echo-trim-zero-length --stdin
+
+	return 0
+)
+function echo_trim_zero_length() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Trims zero-length lines from <input>.
+
+			USAGE:
+			echo-trim-zero-length [...options] [--] ...<input>
+			echo-lines ...<input> | echo-trim-zero-length [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-trim-zero-length -- 'a' '' 'b' ' ' 'c' 'null' 'd' 'false'
+
+			    a
+			    b
+
+			    c
+			    null
+			    d
+			    false
+
+			echo-lines -- 'a' '' 'b' ' ' 'c' 'null' 'd' 'false' | echo-trim-zero-length --stdin
+
+			    a
+			    b
+
+			    c
+			    null
+			    d
+			    false
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function on_line {
+		if [[ -n $1 ]]; then
+			__print_lines "$1"
+		fi
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		echo_trim_zero_length_test
+	else
+		echo_trim_zero_length "$@"
+	fi
+fi

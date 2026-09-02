@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/screen/filelist
+# /usr/bin/screen
+
+function setup_util_screen() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='screen'
+		"$@"
+		APK='screen' # ALPINE
+		APT='screen' # UBUNTU
+		BREW='screen'
+		RPM='screen'    # FEDORA
+		ZYPPER='screen' # SUSE
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_screen "$@"
+fi

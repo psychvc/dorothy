@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+function rm_deno_cache() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Removes everything inside the Deno cache.
+
+			USAGE:
+			rm-deno-cache
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# ensure DENO_DIR exists
+	if [[ -z ${DENO_DIR-} ]]; then
+		DENO_DIR="$HOME/Library/Caches/deno"
+	fi
+
+	# remove files knowing DENO_DIR now exists
+	fs-remove --quiet --no-confirm -- "$DENO_DIR/deps" "$DENO_DIR/gen"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	rm_deno_cache "$@"
+fi

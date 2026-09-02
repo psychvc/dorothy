@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# Sample XPS file available at:
+# https://github.com/microsoft/Windows-classic-samples/blob/67a8cddc25880ebc64018e833f0bf51589fd4521/Samples/Win7Samples/xps/XpsLoadModifySave/sample1.xps
+
+# Thanks to [Sriram Thaiyar](https://github.com/sri) for the [original ruby version](https://github.com/sri/xps2pdf/) which figured out [GhostPDL](https://ghostscript.com/download/gpdldnld.html) can be used for the conversion.
+
+# This command is referenced in this gist:
+# https://gist.github.com/balupton/7f15f6627d90426f12b24a12a4ac5975
+
+# @todo merge into [convert-helper]
+function xps2pdf_() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Convert from XPS (XML Paper Specification) to PDF, using GXPS from GhostPDL from GhostScript.
+
+			USAGE:
+			xps2pdf [--] ...<path>
+
+			EXAMPLES:
+			xps2pdf -- *.xps             # all .xps files in the current directory
+			xps2pdf -- one.xps two.xps   # specific files
+
+			QUIRKS:
+			If supported, the PDF files will be created with the same creation time as the original XPS files.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_paths=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_paths+=("$@")
+			shift "$#"
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_paths+=("$item") ;;
+		esac
+	done
+
+	# check
+	if [[ ${#option_paths[@]} -eq 0 ]]; then
+		help 'No <path>s provided.'
+	fi
+
+	# =====================================
+	# Dependency
+
+	__command_required -- 'gxps' || return $?
+
+	# =====================================
+	# Action
+
+	local xps pdf ctime
+	__print_style --bold="Converting " --code="${#paths[@]}" --bold=" files" || return $?
+	for xps in "${option_paths[@]}"; do
+		pdf="${xps%.xps}.pdf"
+
+		__print_style --bold="Converting " --code="$xps" --bold=" to " --code="$pdf" || return $?
+		gxps -sDEVICE=pdfwrite -sOutputFile="$pdf" -dNOPAUSE "$xps" || return $?
+
+		if __command_exists -- GetFileInfo SetFile; then
+			ctime="$(GetFileInfo -m "$xps")" || return $?
+			SetFile -d "$ctime" "$pdf" || return $?
+		fi
+
+		__print_style --success="Converted " --code="$xps" --success=" to " --code="$pdf" || return $?
+	done
+
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	xps2pdf_ "$@"
+fi

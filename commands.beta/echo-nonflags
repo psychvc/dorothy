@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+function echo_nonflags() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Output all arguments that aren't flags.
+
+			USAGE:
+			echo-nonflags [...options] [--] ...<input>
+			echo-lines ...<input> | echo-nonflags [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-nonflags -- code -a --b c
+
+			    code
+			    c
+			    # exit status: 0
+
+			echo-lines -- code -a --b c | echo-nonflags --stdin
+
+			    code
+			    c
+			    # exit status: 0
+
+			QUIRKS:
+
+			[edit --dry | echo-nonflags --stdin] will output [code -w -n] because of the following:
+
+			printf '%s\n' 'code -a --b c' | echo-nonflags --stdin
+
+			    code -a --b c
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	function __on_piece {
+		if [[ $1 != -* ]]; then
+			__print_lines "$1" || return $?
+		fi
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_nonflags "$@"
+fi

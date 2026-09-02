@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+# @should be renamed to [eval-then-echo-status]
+
+function echo_exit_status() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Given a command as arguments, execute it, output the exit status.
+
+			USAGE:
+			echo-exit-status [--] ...<command>
+
+			EXAMPLES:
+			echo-exit-status -- exit 0    # outputs: 0    exit status: 0
+			echo-exit-status -- exit 1    # outputs: 1    exit status: 0
+			echo-exit-status -- exit 2    # outputs: 2    exit status: 0
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item cmd=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			cmd+=("$@")
+			shift "$#"
+			break
+			;;
+		*) cmd+=("$item") ;;
+		esac
+	done
+
+	# check
+	if [[ ${#cmd[@]} -eq 0 ]]; then
+		help 'No <command> was provided.'
+	fi
+
+	# =====================================
+	# Action
+
+	local cmd_status
+	__try {cmd_status} -- "${cmd[@]}"
+	__print_lines "$cmd_status"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_exit_status "$@"
+fi

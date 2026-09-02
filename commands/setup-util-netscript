@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+# https://packages.debian.org/sid/amd64/netscript-2.4/filelist
+# /sbin/ifdown
+# /sbin/ifup
+# /sbin/netscript
+
+function setup_util_netscript() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-linux; then
+		__print_style --stderr --notice="[$0] is only intended to be run on Linux systems, skipping." || return $?
+		return 0
+	fi
+
+	# no apk
+	local options=(
+		--name='NetScript [ifup/ifdown]'
+		--cli='ifup'
+		"$@"
+		APT='netscript-2.4' # UBUNTU
+	)
+	setup-util "${options[@]}" || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_netscript "$@"
+fi

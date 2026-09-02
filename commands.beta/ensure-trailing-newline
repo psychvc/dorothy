@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+function ensure_trailing_newline() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Ensure an existing file has a trailing newline.
+
+			USAGE:
+			ensure-trailing-newline [...options] [--] ...<path>
+
+			OPTIONS:
+			--elevated=<elevated>
+			--elevate=<elevate>
+			--user=<user>
+			--group=<group>
+			--reason=<reason>
+			    Forwarded to [eval-helper].
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_paths=() option_elevated='' option_elevate='' option_user='' option_group='' option_reason=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		# <elevate>
+		'--elevated='*) option_elevated="${item#*=}" ;;
+		'--no-elevate'* | '--elevate'*) __flag --source={item} --target={option_elevate} --affirmative --no-coerce ;;
+		'--user='*) option_user="${item#*=}" ;;
+		'--group='*) option_group="${item#*=}" ;;
+		'--reason='*) option_reason="${item#*=}" ;;
+		# </elevate>
+		'--')
+			option_paths+=("$@")
+			shift "$#"
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_paths+=("$item") ;;
+		esac
+	done
+
+	# check
+	if [[ ${#option_paths[@]} -eq 0 ]]; then
+		help "No <path>s provided"
+	fi
+
+	# =====================================
+	# Action
+
+	local path reason result
+	for path in "${option_paths[@]}"; do
+		reason="${option_reason:-"Your password is required to momentarily grant privileges to ensure a trailing newline in the file: $path"}"
+		# check if it has a trailing newline, 0 = no, 1 = yes
+		result="$(echo-file --raw --elevated="$option_elevated" --elevate="$option_elevate" --user="$option_user" --group="$option_group" --reason="$reason" -- "$path" | tail -n1 | wc -l | echo-trim-each-line --stdin)"
+		if [[ $result == 0 ]]; then # use ==, as number not guaranteed
+			# requires trailing newline to be added
+			__print_line | echo-write --elevated="$option_elevated" --elevate="$option_elevate" --user="$option_user" --group="$option_group" --reason="$reason" -- "$path"
+		fi
+	done
+	return 0
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	ensure_trailing_newline "$@"
+fi

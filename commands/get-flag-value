@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+
+function get_flag_value_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# named, not found
+
+	eval-tester --status=91 -- \
+		get-flag-value var --
+
+	eval-tester --status=91 -- \
+		get-flag-value var --affirmative --
+
+	eval-tester --status=91 -- \
+		get-flag-value var --non-affirmative --
+
+	eval-tester --status=91 -- \
+		get-flag-value var -- ''
+
+	eval-tester --status=91 -- \
+		get-flag-value var --affirmative -- ''
+
+	eval-tester --status=91 -- \
+		get-flag-value var --non-affirmative -- ''
+
+	eval-tester --status=91 -- \
+		get-flag-value var -- --other
+
+	eval-tester --status=91 -- \
+		get-flag-value var --affirmative -- --other
+
+	eval-tester --status=91 -- \
+		get-flag-value var --non-affirmative -- --other
+
+	# unnamed, not found
+
+	eval-tester --status=91 -- \
+		get-flag-value --
+
+	eval-tester --status=91 -- \
+		get-flag-value --affirmative --
+
+	eval-tester --status=91 -- \
+		get-flag-value --non-affirmative --
+
+	eval-tester --status=91 -- \
+		get-flag-value -- ''
+
+	eval-tester --status=91 -- \
+		get-flag-value --affirmative -- ''
+
+	eval-tester --status=91 -- \
+		get-flag-value --non-affirmative -- ''
+
+	eval-tester --stdout=yes -- \
+		get-flag-value -- --other
+
+	eval-tester --stdout=yes -- \
+		get-flag-value --affirmative -- --other
+
+	eval-tester --stdout=no -- \
+		get-flag-value --non-affirmative -- --other
+
+	# special cases
+
+	# argument ignored, first flag
+	eval-tester --stdout=two -- \
+		get-flag-value -- one --flag=two
+
+	# first flag
+	eval-tester --stdout=one -- \
+		get-flag-value -- --flag=one --flag=two
+
+	# fallback, unnamed
+	eval-tester --stdout=missing -- \
+		get-flag-value var --fallback=missing -- ''
+
+	# fallback, named
+	eval-tester --stdout=missing -- \
+		get-flag-value var --fallback=missing -- --other
+
+	# named, implied boolean
+	eval-tester --stdout=yes -- \
+		get-flag-value var -- --var
+
+	# named, implied boolean
+	eval-tester --stdout=no -- \
+		get-flag-value var -- --no-var
+
+	# named, value
+	eval-tester --stdout=value -- \
+		get-flag-value var -- --var=value
+
+	# named, empty
+	eval-tester -- \
+		get-flag-value var -- --var=
+
+	# named, affirmative
+
+	eval-tester --stdout=yes -- \
+		get-flag-value var --affirmative -- --var
+
+	eval-tester --stdout=yes -- \
+		get-flag-value var --affirmative -- --var=yes
+
+	eval-tester --stdout=no -- \
+		get-flag-value var --affirmative -- --no-var
+
+	eval-tester --stdout=no -- \
+		get-flag-value var --affirmative -- --var=no
+
+	eval-tester --stdout=no -- \
+		get-flag-value var --non-affirmative -- --var
+
+	eval-tester --stdout=no -- \
+		get-flag-value var --non-affirmative -- --var=yes
+
+	eval-tester --stdout=yes -- \
+		get-flag-value var --non-affirmative -- --no-var
+
+	eval-tester --stdout=yes -- \
+		get-flag-value var --non-affirmative -- --var=no
+
+	eval-tester --stdout=missing -- \
+		get-flag-value var --fallback=missing --affirmative -- --other=asd
+
+	eval-tester --stdout=missing -- \
+		get-flag-value var --fallback=missing --non-affirmative -- --other=asd
+
+	# unnamed, affirmative
+
+	eval-tester --stdout=yes -- \
+		get-flag-value --affirmative -- --var
+
+	eval-tester --stdout=yes -- \
+		get-flag-value --affirmative -- --var=yes
+
+	eval-tester --stdout=no -- \
+		get-flag-value --affirmative -- --no-var
+
+	eval-tester --stdout=no -- \
+		get-flag-value --affirmative -- --var=no
+
+	eval-tester --stdout=no -- \
+		get-flag-value --non-affirmative -- --var
+
+	eval-tester --stdout=no -- \
+		get-flag-value --non-affirmative -- --var=yes
+
+	eval-tester --stdout=yes -- \
+		get-flag-value --non-affirmative -- --no-var
+
+	eval-tester --stdout=yes -- \
+		get-flag-value --non-affirmative -- --var=no
+
+	eval-tester --stdout=asd -- \
+		get-flag-value --fallback=missing --affirmative -- --other=asd
+
+	eval-tester --stdout=asd -- \
+		get-flag-value --fallback=missing --non-affirmative -- --other=asd
+
+	# done
+
+	return 0
+)
+function get_flag_value() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			USAGE:
+			get-flag-value [name] [...options] -- ...<flag>
+
+			OPTIONS:
+			[name]
+			    The flag to search for.
+			    If not provided, it is inferred from the first <flag>.
+
+			--multi
+			    Output the value for each occurrence of the flag, instead of just the first.
+
+			--fallback=<fallback> | --missing=<fallback>
+			    When the flag is missing, use <fallback> as the value.
+
+			--fallback-on-empty
+			    When the flag is empty, use the fallback value.
+
+			--affirmative
+			    Parse the flag as an affirmative value, e.g. [yes] or [no]
+
+			--non-affirmative
+			    Parse the flag as an inverted affirmative value, e.g. [yes] becomes [no], [no] becomes [yes]
+
+			QUIRKS:
+			It does not support [--flag value], only [--[no-]flag[=value]].
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_args=() option_fallback=() option_name='' option_multi='no'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--fallback='* | '--missing='*) option_fallback+=("${item#*=}") ;;
+		'--fallback-on-empty') option_args+=('--no-empty') ;;
+		'--affirmative') option_args+=('--affirmative') ;;
+		'--non-affirmative') option_args+=('--non-affirmative') ;;
+		'--multi') option_multi='yes' ;;
+		'--') break ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $option_name ]]; then
+				option_name="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	local values=()
+	if [[ $option_multi == 'yes' ]]; then
+		option_args+=('--append')
+	fi
+	if [[ -n $option_name ]]; then
+		option_args+=("--name=$option_name")
+	fi
+	__flag --target={values} "${option_args[@]}" -- "$@"
+	if [[ $option_multi == 'no' && ${#values[@]} -gt 1 ]]; then
+		values=("${values[0]}")
+	elif [[ ${#values[@]} -eq 0 ]]; then
+		values=("${option_fallback[@]}")
+		if [[ ${#values[@]} -eq 0 ]]; then
+			return 91 # ENOMSG 91 No message of desired type
+		fi
+	fi
+	__print_lines "${values[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		get_flag_value_test
+	else
+		get_flag_value "$@"
+	fi
+fi

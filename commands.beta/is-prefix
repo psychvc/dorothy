@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+function is_prefix() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# act
+	local needle haystack
+	needle="${1:?"USAGE: is-prefix <NEEDLE> <HAYSTACK>"}"
+	haystack="${2:?"USAGE: is-prefix <needle> <HAYSTACK>"}"
+
+	# oldschool way:
+	# echo-regexp -q "^$needle" -- "$haystack"
+
+	# better way:
+	[[ $needle == "${haystack:0:${#needle}}" ]] || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	is_prefix "$@"
+fi

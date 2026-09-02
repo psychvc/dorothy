@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+
+# https://github.com/charmbracelet/gum#installation
+# Make sure to tap [Show all 35 assets]
+
+# https://github.com/charmbracelet/gum/releases
+# gum-0.11.0.aarch64.rpm
+# gum-0.11.0.armv7hl.rpm
+# gum-0.11.0.i386.rpm
+# gum-0.11.0.tar.gz
+# gum-0.11.0.x86_64.rpm
+# gum_0.11.0_aarch64.apk
+# gum_0.11.0_amd64.deb
+# gum_0.11.0_arm64.deb
+# gum_0.11.0_armhf.deb
+# gum_0.11.0_armv7.apk
+# gum_0.11.0_Darwin_arm64.tar.gz
+# gum_0.11.0_Darwin_x86_64.tar.gz
+# gum_0.11.0_Freebsd_arm.tar.gz
+# gum_0.11.0_Freebsd_arm64.tar.gz
+# gum_0.11.0_Freebsd_i386.tar.gz
+# gum_0.11.0_Freebsd_x86_64.tar.gz
+# gum_0.11.0_i386.deb
+# gum_0.11.0_Linux_arm.tar.gz
+# gum_0.11.0_Linux_arm64.tar.gz
+# gum_0.11.0_Linux_i386.tar.gz
+# gum_0.11.0_Linux_x86_64.tar.gz
+# gum_0.11.0_Netbsd_arm.tar.gz
+# gum_0.11.0_Netbsd_i386.tar.gz
+# gum_0.11.0_Netbsd_x86_64.tar.gz
+# gum_0.11.0_Openbsd_arm.tar.gz
+# gum_0.11.0_Openbsd_arm64.tar.gz
+# gum_0.11.0_Openbsd_i386.tar.gz
+# gum_0.11.0_Openbsd_x86_64.tar.gz
+# gum_0.11.0_Windows_i386.zip
+# gum_0.11.0_Windows_x86_64.zip
+# gum_0.11.0_x86.apk
+# gum_0.11.0_x86_64.apk
+
+# rpm repo support requires the following, which isn't important as they provide .rpm files anyway
+# printf '%s\n' '[charm]
+# name=Charm
+# baseurl=https://repo.charm.sh/yum/
+# enabled=1
+# gpgcheck=1
+# gpgkey=https://repo.charm.sh/yum/gpg.key' | echo-write -- /etc/yum.repos.d/charm.repo
+# sudo yum install gum
+
+function setup_util_gum() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=gum "$@"; then
+		return 0
+	fi
+
+	# setup
+	local arch options=(
+		--cli='gum'
+		"$@"
+		APK='gum'
+		APT_KEY='https://repo.charm.sh/apt/gpg.key'
+		APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://repo.charm.sh/apt/ * *'
+		AUR='gum' # ARCH
+		BREW='gum'
+		GO='github.com/charmbracelet/gum'
+		NIX='nixpkgs.gum'
+		PKG='gum'
+		PORT='gum'
+		SCOOP='charm-gum'
+		WINGET='charmbracelet.gum'
+		XBPS='gum' # VOID
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='charmbracelet/gum' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="$2"
+		)
+	}
+	function __add_apk_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			APK="$url"
+		)
+	}
+	function __add_deb_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DEB="$url"
+		)
+	}
+	function __add_rpm_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			RPM="$url"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '_Darwin_arm64.tar.gz' 'gum' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '_Darwin_x86_64.tar.gz' 'gum' || :
+		fi
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_apk_option '_aarch64.apk' || :
+			__add_deb_option '_arm64.deb' || :
+			__add_rpm_option '.aarch64.rpm' || :
+			__add_download_option '_Linux_arm64.tar.gz' 'gum' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_apk_option '_armv7.apk' || :
+			__add_deb_option '_armhf.deb' || :
+			__add_rpm_option '.armv7hl.rpm' || :
+			__add_download_option '_Linux_arm.tar.gz' 'gum' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_apk_option '_x86_64.apk' || :
+			__add_deb_option '_amd64.deb' || :
+			__add_rpm_option '.x86_64.rpm' || :
+			__add_download_option '_Linux_x86_64.tar.gz' 'gum' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_apk_option '_x86.apk' || :
+			__add_deb_option '_i386.deb' || :
+			__add_rpm_option '.i386.rpm' || :
+			__add_download_option '_Linux_i386.tar.gz' 'gum' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option '_Windows_x86_64.zip' 'gum.exe' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '_Windows_i386.zip' 'gum.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_gum "$@"
+fi

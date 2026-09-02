@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+function wallhaven_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Enter your wallhaven details, and it'll download your wallpaper collections: https://wallhaven.cc
+
+			USAGE:
+			wallhaven-helper [--user=...] [--key=...]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item username='' apikey=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--user='*) username="${item#*=}" ;;
+		'--key='*) apikey="${item#*=}" ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# essentials
+	if [[ -z $username ]]; then
+		username="$(
+			ask --required \
+				--question="Enter the wallhaven username."
+		)"
+	fi
+	if [[ -z $apikey ]]; then
+		apikey="$(
+			ask --required --password \
+				--question="Enter the wallhaven API Key for $username. You can get this from: https://wallhaven.cc/settings/account"
+		)"
+	fi
+
+	# =====================================
+	# Dependencies
+
+	__command_required -- 'jq' || return $?
+	__command_required -- 'deno' || return $?
+
+	# =====================================
+	# Act
+
+	# collections
+	local collections=() collection
+	function __fetch_collections {
+		fetch "https://wallhaven.cc/api/v1/collections?apikey=$apikey" | jq -r '.data[] | (.id, .label)' || return $?
+	}
+	__split --target={collections} --no-zero-length --invoke -- __fetch_collections
+	collection="$(
+		choose \
+			--question='Which collection to download?' \
+			--label --visual="\$LABEL [\$VALUE]" -- \
+			"${collections[@]}"
+	)"
+
+	# run the deno script to fetch the wallpaper urls via the api and store them in a file
+	local deno_script temp_list_file
+	temp_list_file="$(fs-temp --cache --directory='dorothy' --directory='wallhaven-helper' --file="$user-$collection.txt")"
+	deno_script="$(type -P 'wallhaven-helper.ts')"
+	"$deno_script" "$apikey" "$username" "$collection" | tee -- "$temp_list_file"
+
+	# with that file, download each of them
+	local url
+	while read -r url; do
+		down "$url"
+	done <"$temp_list_file"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	wallhaven_helper "$@"
+fi

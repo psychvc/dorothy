@@ -1,0 +1,1927 @@
+#!/usr/bin/env bash
+
+# =====================================
+# OPEN
+
+## SAMBA - MACOS (supports keychain auth, mounts to /Volumes/*, mounts as smbfs)
+# open --hide --background 'smb://username:password@server/share'
+# open --hide --background 'smb://balupton@balupton-mbp._smb._tcp.local/balupton'
+# open --hide --background 'smb://balupton@192.168.4.21/BOOTCAMP'
+# open --hide --background 'smb://Benjamin%20Lupton@192.168.7.94/Data'
+
+# =====================================
+# MOUNTING
+
+## DEVICE
+# eval-helper --elevate -- mount /dev/sdb1 /mnt
+
+## BTRFS
+# /dev/sdb1 on /mnt type btrfs (rw,relatime,space_cache)
+
+## SAMBA - UBUNTU (user,username,pass,password are alias - does not support URI authentication - if no /etc/fstab entry, then requires sudo)
+# eval-helper --elevate -- mount -t cifs //server/share /mnt -o username=user,password=pass
+# eval-helper --elevate -- mount -t cifs //192.168.4.21/balupton ./samba -o "username=balupton,password=hello today"
+
+## SAMBA - MACOS (no keychain auth, no -o auth, mount_smbfs is the tool)
+# mount -t smbfs "//url-escaped-username:url-escaped-password@ip-address/url-escaped-share" ./samba
+
+# -------------------------------------
+# SAMBA - UBUNTU - DMESG ERROR CODES
+
+# This one means that fstab is required:
+# [12880.374435] CIFS: Attempting to mount \\192.168.4.21\balupton
+# [12880.425965] CIFS: Status code returned 0xc000006d STATUS_LOGON_FAILURE
+# [12880.426026] CIFS: VFS: \\192.168.4.21 Send error in SessSetup = -13
+# [12880.426116] CIFS: VFS: cifs_mount failed w/return code = -13
+
+# this one means that the samba share is not available:
+# [12821.997556] CIFS: Attempting to mount \\192.168.4.21\balupton
+# [12832.144532] CIFS: VFS: Error connecting to socket. Aborting operation.
+# [12832.144581] CIFS: VFS: cifs_mount failed w/return code = -115
+
+# =====================================
+## MOUNTED
+
+## DEVICE - MACOS
+# /dev/disk5s1 on /Volumes/Tango (apfs, local, nodev, nosuid, journaled, noowners)
+
+## DEVICE - UBUNTU
+# /dev/sdf on /Volumes/share type btrfs (rw,relatime,space_cache,subvolid=5,subvol=/)
+# /dev/sdb2 on /media/balupton/UNTITLED type vfat (rw,nosuid,nodev,relatime,uid=1000,gid=1000,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,showexec,utf8,flush,errors=remount-ro,uhelper=udisks2)
+
+## SERVICE - UBUNTU
+# log2ram on /var/log type tmpfs (rw,nosuid,nodev,noexec,noatime,size=51200k,mode=755,inode64)
+
+## SAMBA - UBUNTU
+# //192.168.4.21/balupton on /home/balupton/Testing/samba type cifs (rw,relatime,vers=default,cache=strict,username=balupton,uid=0,noforceuid,gid=0,noforcegid,addr=192.168.4.21,file_mode=0755,dir_mode=0755,soft,nounix,serverino,mapposix,rsize=4194304,wsize=4194304,bsize=1048576,echo_interval=60,actimeo=1,closetimeo=1)
+
+## SAMBA - MACOS (afpfs is for legacy time capsule sharing, is legacy, is available by finder and open, it is not available for mount command - however time capsule sharing is mountable as smbfs with mount command)
+# //url-escaped-username@server/share on /Volumes/share (smbfs, nodev, nosuid, mounted by balupton)
+# //Benjamin%20Lupton@tc._afpovertcp._tcp.local/Data on /Volumes/Data (afpfs, nodev, nosuid, mounted by balupton)
+# //balupton@balupton-mbp._smb._tcp.local/System on /Volumes/System (smbfs, nodev, nosuid, mounted by balupton)
+# //Benjamin%20Lupton@192.168.7.94/Data on /Users/balupton/Testing/samba (smbfs, nodev, nosuid, mounted by balupton)
+
+## GOCRYPTFS - MACOS
+# /Users/balupton/Testing/cipher on /Users/balupton/Testing/plain (macfuse, nodev, nosuid, synchronous, mounted by balupton)
+
+## UBUNTU - GOCRYPTFS
+# /Volumes/share/cipher on /Volumes/share type fuse.gocryptfs (rw,nosuid,nodev,relatime,user_id=1001,group_id=1002,default_permissions,allow_other,max_read=131072)
+# /home/balupton/Testing/cipher on /home/balupton/Testing/plain type fuse.gocryptfs (rw,nosuid,nodev,relatime,user_id=1000,group_id=1000,max_read=1048576)
+
+# =====================================
+# FSTAB
+
+## DEVICE - UBUNTU
+# LABEL=writable  /       ext4    discard 0       1
+# /dev/sdb1    /mnt    ext4    defaults    0    0
+# /dev/sdb1    /mnt    btrfs    defaults    0    0
+
+## SAMBA - UBUNTU (fstab octal escaping, \040 = space)
+# //server/share    /mnt    cifs    username=user,password=pass    0    0
+# //192.168.4.21/balupton /home/balupton/Testing/samba cifs username=balupton,password=fstab-escaped-string 0 0
+
+## SAMBA - MACOS
+# //url-escaped-username@server/url-escaped-share /mount-target smbfs auto 0 0
+# //balupton:url-escaped-password@192.168.4.21/balupton /Users/balupton/Testing/samba smbfs auto 0 0
+
+## GOCRYPTFS - UBUNTU
+# /path/to/encrypted    /mnt    fuse.gocryptfs    rw,user_id=0,group_id=0,default_permissions,allow_other    0    0
+
+# =====================================
+# TODOS
+
+# Consider using [lazytime]
+
+# Consider a mount.bash configuration file that will allow
+# MOUNTHELPER_AUTOMOUNTS=(
+# 	-- --samba --username=... --password=... --server=... --share=... --target=...
+# )
+# MOUNTHELPER_AUTOMOUNTS=(
+# 	-- --btrfs --label=... --count=... --target=...
+# 	-- --gocryptfs --share=... --target=... --password=...
+# )
+# mount-helper --auto --mount
+# mount-helper --auto --unmount
+
+# =====================================
+# NOTES
+
+# auto       # ubuntu mount, undocumented macos mount, has [noauto]
+
+# MOUNTED = `mount` output
+# OPEN = `open ...`
+# FSTAB = `/etc/fstab` contents
+
+# [621979.345650] CIFS: No dialect specified on mount. Default has changed to a more secure dialect, SMB2.1 or later (e.g. SMB3.1.1), from CIFS (SMB1). To use the less secure SMB1 dialect to access old servers which do not support SMB3.1.1 (or even SMB3 or SMB2.1) specify vers=1.0 on mount.
+
+# The latest documentation about autofs on macos from 2012-2017, I could not figure anything out that was relevant today. There is no `autofs` brew package, and there is do `autofs` or `autofsd` or `system/autofsd` services.
+
+# Samba on Ubuntu can only be mounted by sudo AND if there is a fstab entry for the target.
+# As such the fsentry must be made, and [noauto] needs to be used if --automount=no.
+
+# Consider user,users,group,owner
+
+# =====================================
+# GOCRYPTFS OPTIONS
+
+# --acl                            Enforce ACLs
+# --aessiv                         AES-SIV encryption
+# --allow_other                    Allow other users to access the filesystem. Only works when user_allow_other is set in /etc/fuse.conf.
+# --badname stringArray            Glob pattern invalid file names that should be shown
+# --config string                  Use specified config file instead of CIPHERDIR/gocryptfs.conf
+# --cpuprofile string              Write cpu profile to specified file
+# --ctlsock string                 Create control socket at specified path
+# --d
+# --debug                          Enable debug output
+# --deterministic-names            Disable diriv file name randomisation
+# --dev                            Allow device files
+# --devrandom                      Obsolete, ignored for compatibility
+# --e stringArray                  Alias for -exclude
+# --ew stringArray                 Alias for -exclude-wildcard
+# --exclude stringArray            Exclude relative path from reverse view
+# --exclude-from stringArray       File from which to read exclusion patterns (with -exclude-wildcard syntax)
+# --exclude-wildcard stringArray   Exclude path from reverse view, supporting wildcards
+# --exec                           Allow executables
+# --extpass stringArray            Use external program for the password prompt
+# --f
+# --fg                             Stay in the foreground
+# --fido2 string                   Protect the masterkey using a FIDO2 token instead of a password
+# --force_owner string             uid:gid pair to coerce ownership
+# --forcedecode                    Obsolete, ignored for compatibility
+# --fsck                           Run a filesystem check on CIPHERDIR
+# --fsname string                  Override the filesystem name
+# --fusedebug                      Enable fuse library debug output
+# --hh                             Show this long help text
+# --hkdf                           Use HKDF as an additional key derivation step (default true)
+# --i duration                     Alias for -idle
+# --idle duration                  Auto-unmount after specified idle duration (ignored in reverse mode). Durations are specified like "500s" or "2h45m". 0 means stay mounted indefinitely.
+# --info                           Display information about CIPHERDIR
+# --init                           Initialize encrypted directory
+# --kernel_cache                   Enable the FUSE kernel_cache option
+# --ko string                      Pass additional options directly to the kernel, comma-separated list
+# --longnamemax uint8              Hash encrypted names that are longer than this (default 255)
+# --longnames                      Store names longer than 175 bytes in extra files (default true)
+# --masterkey string               Mount with explicit master key
+# --memprofile string              Write memory profile to specified file
+# --nodev                          Deny device files
+# --noexec                         Deny executables
+# --nofail                         Ignored for /etc/fstab compatibility
+# --nonempty                       Allow mounting over non-empty directories
+# --noprealloc                     Disable preallocation before writing
+# --nosuid                         Deny suid binaries
+# --nosyslog                       Do not redirect output to syslog when running in the background
+# --notifypid int                  Send USR1 to the specified process after successful mount - used internally for daemonization
+# --o string                       For compatibility with mount(1), options can be also passed as a comma-separated list to -o on the end.
+# --one-file-system                Don't cross filesystem boundaries
+# --openssl string                 Use OpenSSL instead of built-in Go crypto (default "auto")
+# --passfile stringArray           Read password from file
+# --passwd                         Change password
+# --plaintextnames                 Do not encrypt file names
+# --q
+# --quiet                          Quiet - silence informational messages
+# --raw64                          Use unpadded base64 for file names (default true)
+# --reverse                        Reverse mode
+# --ro                             Mount the filesystem read-only
+# --rw                             Mount the filesystem read-write
+# --scryptn int                    scrypt cost parameter logN. Possible values: 10-28. A lower value speeds up mounting and reduces its memory needs, but makes the password susceptible to brute-force attacks (default 16)
+# --serialize_reads                Try to serialize read operations
+# --sharedstorage                  Make concurrent access to a shared CIPHERDIR safer
+# --speed                          Run crypto speed test
+# --suid                           Allow suid binaries
+# --trace string                   Write execution trace to file
+# --version                        Print version and exit
+# --wpanic                         When encountering a warning, panic and exit immediately
+# --xchacha                        Use XChaCha20-Poly1305 file content encryption
+# --zerokey                        Use all-zero dummy master key
+
+# =====================================
+# MACOS MOUNT SMBFS OPTIONS
+
+# nobrowse
+# This option indicates that the mount point should not be visible via the GUI (i.e., appear on the Desktop as a separate volume).
+
+# automounted
+# Set flags on the mountpoint to indicate that the volume has been mounted by the automounter.
+
+# nostreams
+# Don't use NTFS Streams even if they are supported by the server.
+
+# soft
+# Make the mount soft. Fail file system calls after a number of seconds.
+
+# nonotification
+# Turn off using notifications for this volume.
+
+# nodatacache
+# Turn off using file data caching for this volume.
+
+# nomdatacache
+# Turn off using meta data caching for this volume.
+
+# sessionencrypt
+# Force session encryption to be used
+
+# shareencrypt
+# Force share encryption to be used for that share and also for IPC$ traffic
+
+# filemode
+# Specify permissions that should be assigned to files. The value must be specified as an octal number. Default value is taken from mount point.
+# Note that these permissions can differ from the rights granted by SMB server.
+
+# dirmode
+# Specify permissions that should be assigned to directories. The value must be specified as an octal number. Default value adds execute permission where the file mode gives read permission.
+# Note that these permissions can differ from the rights granted by SMB server.
+
+# snapshot
+# Do a read only mount using the specific snapshot of the share.  A new session is created to allow multiple snapshots of the same share to be mounted.  Value must be in GMT format e.g. @GMT-YYYY.MM.DD-HH.MM.SS
+
+# nopassprompt
+# Do not ask for a password.  At run time, mount_smbfs reads the ~/Library/Preferences/nsmb.conf file for additional configuration parameters and a password.  If no password is found, mount_smbfs prompts for it.
+
+# forcenewsession
+# Force a new session to be created to the server.
+
+# =====================================
+# UBUNTU MOUNT CIFS OPTIONS
+
+# uid=arg
+# sets the uid that will own all files or directories on the mounted filesystem when the server does not provide ownership information. It may be specified as either a username or a numeric uid. When not specified, the default is uid 0. The mount.cifs helper must be at version 1.10 or higher to support specifying the uid in non-numeric form. See the section on FILE AND DIRECTORY OWNERSHIP AND PERMISSIONS below for more information.
+
+# forceuid
+# instructs  the  client  to ignore any uid provided by the server for files and directories and to always assign the owner to be the value of the uid= option. See the section on FILE AND DIRECTORY OWNERSHIP AND PERMISSIONS below for more information.
+
+# gid=arg
+# sets  the  gid that will own all files or directories on the mounted filesystem when the server does not provide ownership information. It may be specified as either a groupname or a numeric gid. When not specified, the default is gid 0. The mount.cifs helper must be at version 1.10 or higher to support specifying the gid in non-numeric form. See the section on FILE AND DIRECTORY OWNERSHIP AND PERMISSIONS below for more information.
+
+# forcegid
+# instructs the client to ignore any gid provided by the server for files and directories and to always assign the owner to be the value of the gid= option. See the section on FILE AND DIRECTORY OWNERSHIP AND PERMISSIONS below for more information.
+
+# file_mode=arg
+# If the server does not support the CIFS Unix extensions this overrides the default file mode.
+
+# dir_mode=arg
+# If the server does not support the CIFS Unix extensions this overrides the default mode for directories.
+
+# guest
+# don't prompt for a password.
+
+# iocharset
+# Charset used to convert local path names to and from Unicode. Unicode is used by default for network path names if the server supports it. If iocharset is not specified then the nls_default specified during the local client kernel build will be used. If server does not support Unicode, this parameter is unused.
+
+# setuids
+# If the CIFS Unix extensions are negotiated with the server the client will attempt to set the effective uid and gid of the local process on newly created files, directories, and devices (create, mkdir, mknod). If the CIFS Unix Extensions are not negotiated, for newly created files and directories instead of using the default uid and gid specified on the the mount, cache the new file's uid and gid locally which means that the uid for the file can change when the inode is reloaded (or the user remounts the share).
+
+# nosetuids
+# The client will not attempt to set the uid and gid on on newly created files, directories, and devices (create, mkdir, mknod) which will result in the server setting the uid and gid to the default (usually the server uid of the user who mounted the share). Letting the server (rather than the client) set the uid and gid is the default. If the CIFS Unix Extensions are not negotiated then the uid and gid for new files will appear to be the uid  (gid) of the mounter or the uid (gid) parameter specified on the mount.
+
+# sec=arg
+# Security mode. Allowed values are:
+# • none - attempt to connection as a null user (no name)
+# • krb5 - Use Kerberos version 5 authentication
+# • krb5i - Use Kerberos authentication and forcibly enable packet signing
+# • ntlm - Use NTLM password hashing
+# • ntlmi - Use NTLM password hashing and force packet signing
+# • ntlmv2 - Use NTLMv2 password hashing
+# • ntlmv2i - Use NTLMv2 password hashing and force packet signing
+# • ntlmssp - Use NTLMv2 password hashing encapsulated in Raw NTLMSSP message
+# • ntlmsspi - Use NTLMv2 password hashing encapsulated in Raw NTLMSSP message, and force packet signing
+# The default in mainline kernel versions prior to v3.8 was sec=ntlm. In v3.8, the default was changed to sec=ntlmssp.
+# If the server requires signing during protocol negotiation, then it may be enabled automatically. Packet signing may also be enabled automatically if it's enabled in /proc/fs/cifs/SecurityFlags.
+
+# seal
+# Request encryption at the SMB layer. The encryption algorithm used is AES-128-CCM. Requires SMB3 or above (see vers).
+
+# multiuser
+# Map user accesses to individual credentials when accessing the server. By default, CIFS mounts only use a single set of user credentials (the mount credentials) when accessing a share. With this option, the client instead creates a new session with the server using the user's credentials whenever a new user accesses the mount.  Further accesses by that user will also use those credentials. Because the kernel cannot prompt for  passwords,  multiuser mounts are limited to mounts using sec= options that don't require passwords. With this change, it's feasible for the server to handle permissions enforcement, so this option also implies noperm . Furthermore, when unix extensions aren't in use and the administrator has not overridden ownership using the uid= or gid= options, ownership of files is presented as the current user accessing the share.
+
+# =====================================
+# MACOS MOUNT OPTIONS (complete)
+
+# noasync
+# This filesystem should not force all I/O to be written asynchronously.
+
+# noauto
+# This filesystem should be skipped when mount is run with the -a flag.
+
+# nodev
+# Do not interpret character or block special devices on the file system.  This option is useful for a server that has file systems containing special devices for architectures other than its own.
+
+# noexec
+# Do not allow execution of any binaries on the mounted file system.  This option is useful for a server that has file systems containing binaries for architectures other than its own.
+
+# noowners
+# Ignore the ownership field for the entire volume.  This causes all objects to appear as owned by user ID 99 and group ID 99.  User ID 99 is interpreted as the current effective user ID, while group ID 99 is used directly and translates to ``unknown''.
+
+# nosuid
+# Do not allow set-user-identifier or set-group-identifier bits to take effect.
+
+# rdonly
+# The same as -r; mount the file system read-only (even the super-user may not write it).
+
+# sync
+# All I/O to the file system should be done synchronously.
+
+# update
+# The same as -u; indicate that the status of an already mounted file system should be changed.
+
+# union
+# Causes the namespace to appear as the union of directories of the mounted filesystem with corresponding directories in the underlying filesystem.  Lookups will be done in the mounted filesystem first.  If those operations fail due to a non-existent file the underlying directory is then accessed.
+
+# noatime
+# Do not update the file access time when reading from a file.  This option is useful on file systems where there are large numbers of files and performance is more critical than updating the file access time (which is rarely ever important).
+
+# strictatime
+# Always update the file access time when reading from a file. Without this option the filesystem may default to a less strict update mode, where some access time updates are skipped for performance reasons. This option could be ignored if it is not supported by the filesystem.
+
+# nobrowse
+# This option indicates that the mount point should not be visible via the GUI (i.e., appear on the Desktop as a separate volume).
+
+# nofollow
+# This option indicates that in the course of the mount system call, the kernel should not follow any symlinks that may be present in the provided mount-on directory. This is the same as the -k option.
+
+# =====================================
+# UBUNTU MOUNT OPTIONS (incomplete)
+
+# async
+# All I/O to the filesystem should be done asynchronously. (See also the sync option.)
+
+# atime
+# Do not use the noatime feature, so the inode access time is controlled by kernel defaults. See also the descriptions of the relatime and strictatime mount options.
+
+# noatime
+# Do not update inode access times on this filesystem (e.g. for faster access on the news spool to speed up news servers). This works for all inode types (directories too), so it implies nodiratime.
+
+# auto
+# Can be mounted with the -a option.
+
+# noauto
+# Can only be mounted explicitly (i.e., the -a option will not cause the filesystem to be mounted).
+
+# defaults
+# Use the default options: rw, suid, dev, exec, auto, nouser, and async.
+# Note that the real set of all default mount options depends on the kernel and filesystem type. See the beginning of this section for more details.
+
+# dev
+# Interpret character or block special devices on the filesystem.
+
+# nodev
+# Do not interpret character or block special devices on the filesystem.
+
+# diratime
+# Update directory inode access times on this filesystem. This is the default. (This option is ignored when noatime is set.)
+
+# nodiratime
+# Do not update directory inode access times on this filesystem. (This option is implied when noatime is set.)
+
+# dirsync
+# All directory updates within the filesystem should be done synchronously. This affects the following system calls: creat(2), link(2), unlink(2), symlink(2), mkdir(2), rmdir(2), mknod(2) and rename(2).
+
+# exec
+# Permit execution of binaries and other executable files.
+
+# noexec
+# Do not permit direct execution of any binaries on the mounted filesystem.
+
+# group
+# Allow an ordinary user to mount the filesystem if one of that user’s groups matches the group of the device. This option implies the options nosuid and nodev (unless overridden by subsequent options, as in the option line group,dev,suid).
+
+# iversion
+# Every time the inode is modified, the i_version field will be incremented.
+
+# noiversion
+# Do not increment the i_version inode field.
+
+# mand
+# Allow mandatory locks on this filesystem. See fcntl(2). This option was deprecated in Linux 5.15.
+
+# nomand
+# Do not allow mandatory locks on this filesystem.
+
+# _netdev
+# The filesystem resides on a device that requires network access (used to prevent the system from attempting to mount these filesystems until the network has been enabled on the system).
+
+# nofail
+# Do not report errors for this device if it does not exist.
+
+# relatime
+# Update inode access times relative to modify or change time. Access time is only updated if the previous access time was earlier than the current modify or change time. (Similar to noatime, but it doesn’t break mutt(1) or other applications that need to know if a file has been read since the last time it was modified.)
+# Since Linux 2.6.30, the kernel defaults to the behavior provided by this option (unless noatime was specified), and the strictatime option is required to obtain traditional semantics. In addition, since Linux 2.6.30, the file’s last access time is always updated if it is more than 1 day old.
+
+# norelatime
+# Do not use the relatime feature. See also the strictatime mount option.
+
+# strictatime
+# Allows to explicitly request full atime updates. This makes it possible for the kernel to default to relatime or noatime but still allow userspace to override it. For more details about the default system mount options see /proc/mounts.
+
+# nostrictatime
+# Use the kernel’s default behavior for inode access time updates.
+
+# lazytime
+# Only update times (atime, mtime, ctime) on the in-memory version of the file inode.
+# This mount option significantly reduces writes to the inode table for workloads that perform frequent random writes to preallocated files.
+# The on-disk timestamps are updated only when:
+# •   the inode needs to be updated for some change unrelated to file timestamps
+# •   the application employs fsync(2), syncfs(2), or sync(2)
+# •   an undeleted inode is evicted from memory
+# •   more than 24 hours have passed since the inode was written to disk.
+
+# nolazytime
+# Do not use the lazytime feature.
+
+# suid
+# Honor set-user-ID and set-group-ID bits or file capabilities when executing programs from this filesystem.
+
+# nosuid
+# Do not honor set-user-ID and set-group-ID bits or file capabilities when executing programs from this filesystem. In addition, SELinux domain transitions require permission nosuid_transition, which in turn needs also policy capability nnp_nosuid_transition.
+
+# silent
+# Turn on the silent flag.
+
+# loud
+# Turn off the silent flag.
+
+# owner
+# Allow an ordinary user to mount the filesystem if that user is the owner of the device. This option implies the options nosuid and nodev (unless overridden by subsequent options, as in the option line owner,dev,suid).
+
+# remount
+# Attempt to remount an already-mounted filesystem. This is commonly used to change the mount flags for a filesystem, especially to make a readonly filesystem writable. It does not change device or mount point.
+# The remount operation together with the bind flag has special semantics. See above, the subsection Bind mounts.
+# The remount functionality follows the standard way the mount command works with options from fstab. This means that mount does not read fstab (or mtab) only when both device and dir are specified.
+# mount -o remount,rw /dev/foo /dir
+# After this call all old mount options are replaced and arbitrary stuff from fstab (or mtab) is ignored, except the loop= option which is internally generated and maintained by the mount command.
+# mount -o remount,rw /dir
+# After this call, mount reads fstab and merges these options with the options from the command line (-o). If no mountpoint is found in fstab, then a remount with unspecified source is allowed.
+# mount allows the use of --all to remount all already mounted filesystems which match a specified filter (-O and -t). For example:
+# mount --all -o remount,ro -t vfat
+# remounts all already mounted vfat filesystems in read-only mode. Each of the filesystems is remounted by mount -o remount,ro /dir semantic. This means the mount command reads fstab or mtab and merges these options with the options from the command line.
+
+# ro
+# Mount the filesystem read-only.
+
+# rw
+# Mount the filesystem read-write.
+
+# sync
+# All I/O to the filesystem should be done synchronously. In the case of media with a limited number of write cycles (e.g. some flash drives), sync may cause life-cycle shortening.
+
+# user
+# Allow an ordinary user to mount the filesystem. The name of the mounting user is written to the mtab file (or to the private libmount file in /run/mount on systems without a regular mtab) so that this same user can unmount the filesystem again. This option implies the options noexec, nosuid, and nodev (unless overridden by subsequent options, as in the option line user,exec,dev,suid).
+
+# nouser
+# Forbid an ordinary user to mount the filesystem. This is the default; it does not imply any other options.
+
+# users
+# Allow any user to mount and to unmount the filesystem, even when some other ordinary user mounted it. This option implies the options noexec, nosuid, and nodev (unless overridden by subsequent options, as in the option line users,exec,dev,suid).
+
+# X-*
+# All options prefixed with "X-" are interpreted as comments or as userspace application-specific options. These options are not stored in user space (e.g., mtab file), nor sent to the mount.type helpers nor to the mount(2) system call. The suggested format is X-appname.option.
+
+# x-*
+# The same as X-* options, but stored permanently in user space. This means the options are also available for umount(8) or other operations. Note that maintaining mount options in user space is tricky, because it’s necessary use libmount-based tools and there is no guarantee that the options will be always available (for example after a move mount operation or in unshared namespace).
+
+# Note that before util-linux v2.30 the x-* options have not been maintained by libmount and stored in user space (functionality was the same as for X-* now), but due to the growing number of use-cases (in initrd, systemd etc.) the functionality has been extended to keep existing fstab configurations usable without a change.
+
+# X-mount.mkdir[=mode]
+# Allow to make a target directory (mountpoint) if it does not exist yet. The optional argument mode specifies the filesystem access mode used for mkdir(2) in octal notation. The default mode is 0755. This functionality is supported only for root users or when mount is executed without suid permissions. The option is also supported as x-mount.mkdir, but this notation is deprecated since v2.30. See also --mkdir command line option.
+
+# X-mount.subdir=directory
+# Allow mounting sub-directory from a filesystem instead of the root directory. For now, this feature is implemented by temporary filesystem root directory mount in unshared namespace and then bind the sub-directory to the final mount point and umount the root of the filesystem. The sub-directory mount shows up atomically for the rest of the system although it is implemented by multiple mount(2) syscalls. This feature is EXPERIMENTAL.
+
+# nosymfollow
+# Do not follow symlinks when resolving paths. Symlinks can still be created, and readlink(1), readlink(2), realpath(1), and realpath(3) all still work properly.
+
+function mount_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Helpers
+
+	function __is_samba {
+		[[ $1 =~ ^(samba|smb|smbfs|cifs)$ ]] || return $?
+	}
+	function __is_gocryptfs {
+		[[ $1 =~ ^(gocryptfs|fuse.gocryptfs)$ ]] || return $?
+	}
+	function stringify_args {
+		# output non-empty arguments as space separated strings
+		local result=() arg
+		for arg in "$@"; do
+			# don't include empty args
+			if [[ -n $arg && $arg != *'=' && $arg != *"=''" ]]; then
+				result+=("$arg")
+			fi
+		done
+		__print_lines "${result[*]}"
+	}
+
+	# =====================================
+	# Action
+
+	local option_actions option_automount option_fstab option_cron option_remount option_type option_own option_user option_group option_owner option_username option_password option_server option_label option_count option_share option_source option_target
+	function reset {
+		option_actions=''
+		option_automount=''
+		option_fstab=''
+		option_cron=''
+		option_remount=''
+		option_type=''
+		option_own=''
+		option_user=''
+		option_group=''
+		option_owner=''
+		option_username=''
+		option_password=''
+		option_server=''
+		option_label=''
+		option_count=''
+		option_share=''
+		option_source=''
+		option_target=''
+	}
+	reset
+	function action {
+		# open is for `open ...` calls
+		# mounted is for results of `mount` command
+		# fstab is for `mount` command and fstab entries
+		local temp='' temp_status=''
+		local mount_source='' mounted_source='' fstab_source='' open_source='' gocryptfs_source=''
+		local mount_type='' mounted_type='' fstab_type=''
+		local fstab_options=() gocryptfs_options=()
+		local check_source='' check_target='' check_type=''
+		local fstab_line='' fstab_target='' fstab_needle='' cron_args=() cron_line='' cron_source='' cron_target='' cron_needle=''
+		local open_cmd=() gocryptfs_cmd=() mount_cmd=()
+		local owner_cmd=() root_cmd=() exists_cmd=() exists_root_cmd=() ls_cmd=() mkdir_cmd=() rm_cmd=() rm_root_cmd=() mounting_cmd=() unmount_cmd=() unmount_force_cmd=()
+		local uses_ownership='no' uses_fstab='' uses_cron='' uses_wait='no' uses_mkdir='no' uses_root_for_mount='no' uses_root_for_unmount='no'
+
+		# skip if first --
+		if [[ -z $option_type && -z $option_server && -z $option_share && -z $option_source && -z $option_target ]]; then
+			return 0
+		fi
+
+		# prepare ownership
+		if [[ $option_own == 'yes' || -n $option_owner || -n $option_user || -n $option_group ]]; then
+			uses_ownership='yes'
+		fi
+
+		# prepare automount
+		# don't infer automount from fstab/cron, as [--fstab] can or cannot be automount, and [--fstab] is not [--cron]
+		if [[ -n $option_automount ]]; then
+			# default both if not specified
+			if [[ -z $option_cron ]]; then
+				option_cron="$option_automount"
+			fi
+			if [[ -z $option_fstab ]]; then
+				option_fstab="$option_automount"
+			fi
+		fi
+		# option_{automount,fstab,cron} could still be empty string, as intended, which allows autodetection
+
+		# generate the title, and use it to check we have a valid action
+		local title='mount-helper'
+		if [[ $option_actions == *'[parse]'* ]]; then
+			title+=' --parse'
+		fi
+		if [[ $option_actions == *'[check]'* ]]; then
+			title+=' --check'
+		fi
+		if [[ $option_actions == *'[mount]'* ]]; then
+			title+=' --mount'
+		fi
+		if [[ $option_actions == *'[unmount]'* ]]; then
+			title+=' --unmount'
+		fi
+		if [[ -n $option_automount ]]; then
+			title+=" --automount=$option_automount"
+		fi
+		if [[ $title == 'mount-helper' ]]; then
+			help "No <action> was provided, at least one of these is required: --parse, --check, --mount, --unmount, --automount, --noautomount"
+		fi
+
+		# now that the title is checked for a valid action, add important options to the title
+		if [[ -n $option_cron ]]; then
+			title+=" --cron=$option_cron"
+		fi
+		if [[ -n $option_fstab ]]; then
+			title+=" --fstab=$option_fstab"
+		fi
+
+		# coerce target
+		if [[ -n $option_target ]]; then
+			option_target="$(fs-path --resolve --no-validate -- "$option_target")"
+		fi
+
+		# coerce source options by parsing source
+		if [[ -n $option_source ]]; then
+			temp=''
+			# {type}:?//{user}:{password}@{server}/{share}
+			if [[ $temp == *'://'* ]]; then
+				option_type="${temp%%://*}"
+				temp="${temp#*://}"
+			elif [[ $temp == *'//'* ]]; then
+				option_type="${temp%%//*}"
+				temp="${temp#*//}"
+			fi
+			# check [what] was supplied, as inference is possible but problematic
+			if [[ -z $option_type ]]; then
+				help 'When using ' --code="--source=$option_source" ' ensure ' --code='<type>://...' ' or ' --code='--type=<type>' ' is provided'
+			fi
+			# {username}:{password}@{server}/{share}
+			if [[ $temp == *':'*'@'* ]]; then
+				option_username="${temp%%:*}"
+				temp="${temp#*:}"
+				option_password="${temp%%@*}"
+				temp="${temp#*@}"
+			elif [[ $temp == *'@'* ]]; then
+				option_username="${temp%%@*}"
+				temp="${temp#*@}"
+			fi
+			# {server}/{share} OR {share}
+			if __is_samba "$option_type"; then
+				# trim leading /
+				option_server="${temp%%/*}"
+				# trim leading and trailing /
+				option_share="${temp#*/}"
+				option_share="${option_share%%/*}"
+			else
+				# everything goes in share
+				option_share="$temp"
+			fi
+		fi
+
+		# coerce formats
+		if __is_samba "$option_type"; then
+			option_type='samba'
+
+			# validate
+			if [[ -n $option_server || -n $option_share ]]; then # optional under [check]
+				if [[ -z $option_server || -z $option_share ]]; then
+					help 'When using <samba>, both <server> and <share> must be used together'
+				fi
+			fi
+
+			if is-mac; then
+				# macos samba
+				mount_type='smbfs'
+				mounted_type='smbfs'
+				fstab_type='smbfs'
+
+				fstab_options+=(
+					noatime    # ubuntu mount, macos mount, (not supported by gocryptfs)
+					nodev      # ubuntu mount, macos mount, gocryptfs mount
+					noexec     # ubuntu mount, macos mount, gocryptfs mount
+					noowners   # macos mount
+					nosuid     # macos mount, gocryptfs mount
+					quarantine # macos mount (undocumented)
+				)
+				# this is here to ensure [--samba --target=... --unmount] works
+				if [[ $option_target == '/Volumes/'* ]]; then
+					uses_wait='yes'
+				else
+					uses_fstab='yes'
+					uses_mkdir='yes'
+				fi
+
+				# coerce source
+				if [[ -n $option_share ]]; then # optional under [check]
+					open_source="smb://"
+					mount_source='//'
+					mounted_source='//'
+					fstab_source='//'
+
+					# @todo consider using guest as default username
+					if [[ -n $option_username || -n $option_password ]]; then
+						if [[ -n $option_username ]]; then
+							temp="$(echo-url-encode -- "$option_username")"
+							open_source+="$temp"
+							mount_source+="$temp"
+							mounted_source+="$temp"
+							fstab_source+="$temp"
+						fi
+						if [[ -n $option_password ]]; then
+							temp=":$(echo-url-encode -- "$option_password")"
+							open_source+="$temp"
+							mount_source+="$temp"
+							# password is removed from mounted_source
+							fstab_source+="$temp"
+						fi
+						open_source+="@"
+						mount_source+="@"
+						mounted_source+="@"
+						fstab_source+="@"
+					fi
+
+					# add server and share
+					temp="$(echo-url-encode -- "$option_server/$option_share")"
+					open_source+="$temp"
+					mount_source+="$temp"
+					mounted_source+="$temp"
+					fstab_source+="$temp"
+
+					if [[ -z $option_target ]]; then
+						option_target="/Volumes/$option_share"
+					fi
+					if [[ $option_target == '/Volumes/'* ]]; then
+						# [mount ... /Volumes/*] not possible
+						# sudo not necessary for open command
+						uses_fstab='no' # overwrite manual errors
+						mount_source=''
+						open_cmd+=(
+							'open'
+							'--background'
+							'--hide'
+							"$open_source"
+						)
+					fi
+				fi
+			else
+				# ubuntu samba
+				mount_type='cifs'
+				mounted_type='cifs'
+				fstab_type='cifs'
+
+				uses_fstab='yes'
+				uses_mkdir='yes'
+
+				# we use [iocharset=utf8] during mounting to ensure utf8 is used rather than some peculiar default determined at kernel build time via the compiler's [NLS_DEFAULT]
+				# having the server specify [unix charset = UTF-8] in [/etc/samba/smb.conf]  had no effect, and would not cause the client to fail if the client did not support UTF8
+				fstab_options+=(
+					iocharset=utf8 # ubuntu mount (only samba)
+					noexec         # ubuntu mount, macos mount
+					noatime        # ubuntu mount, macos mount
+					nodev          # ubuntu mount, macos mount
+					nosetuids      # ubuntu mount (only samba), (not supported by gocryptfs)
+					rw             # ubuntu mount, macos mount has [rdonly], gocryptfs mount
+					user           # ubuntu mount, (not supported by gocryptfs)
+					# X-mount.mkdir # ubuntu mount (doesn't work)
+				)
+				if [[ -n $option_username ]]; then
+					fstab_options+=(
+						"username=$(echo-fstab-encode -- "$option_username")"
+					)
+				fi
+				if [[ -n $option_password ]]; then
+					fstab_options+=(
+						"password=$(echo-fstab-encode -- "$option_password")"
+					)
+				fi
+
+				# coerce source
+				if [[ -n $option_share ]]; then # check can miss this
+					mount_source='//'
+					mounted_source='//'
+					fstab_source='//'
+
+					temp="$(echo-url-encode -- "$option_server/$option_share")"
+					mount_source+="$temp"
+					mounted_source+="$temp"
+					fstab_source+="$temp"
+				fi
+			fi
+
+		elif __is_gocryptfs "$option_type"; then
+			option_type='gocryptfs'
+			uses_mkdir='yes'
+
+			if is-mac; then
+				# macos gocryptfs
+				# direct gocryptfs [mount] and [fstab] not available for macos
+				mounted_type='macfuse'
+			else
+				# ubuntu gocryptfs
+				mount_type='fuse.gocryptfs'
+				mounted_type='fuse.gocryptfs'
+				fstab_type='fuse.gocryptfs'
+				fstab_options+=(
+					nodev      # ubuntu mount, macos mount, gocryptfs mount
+					noexec     # ubuntu mount, macos mount, gocryptfs mount
+					noprealloc # gocryptfs mount (for btrfs performance)
+					nosuid     # macos mount, gocryptfs mount
+					rw         # ubuntu mount, macos mount has [rdonly], gocryptfs mount
+				)
+				uses_root_for_unmount='yes'
+			fi
+			gocryptfs_options+=(
+				'--nodev'      # ubuntu mount, macos mount, gocryptfs mount
+				'--noexec'     # ubuntu mount, macos mount, gocryptfs mount
+				'--noprealloc' # gocryptfs mount (for btrfs performance)
+				'--nosuid'     # macos mount, gocryptfs mount
+				'--rw'         # ubuntu mount, macos mount has [rdonly], gocryptfs mount
+			)
+			if [[ -n $option_password ]]; then
+				# --extpass stringArray            Use external program for the password prompt
+				# @todo figure out the escaping to convert this to printf, such as passwords can begin with a dash
+				gocryptfs_options+=(
+					"--extpass=echo $option_password"
+				)
+				fstab_options+=(
+					"extpass=$(echo-fstab-encode -- "echo $option_password")"
+				)
+			fi
+			if [[ -n $option_owner ]]; then
+				if is-mac; then
+					__print_error '<owner> with <gocryptfs> is not supported on macOS.'
+					return 19 # ENODEV 19 Operation not supported by device
+				fi
+				# neither of these require sudo
+				# --allow_other                    Allow other users to access the filesystem. Only works when user_allow_other is set in /etc/fuse.conf.
+				# --force_owner string             uid:gid pair to coerce ownership
+				gocryptfs_options+=(
+					'--allow_other'
+					'--force_owner' "$option_owner"
+				)
+				fstab_options+=(
+					'allow_other'
+					"force_owner=$(echo-fstab-encode -- "$option_owner")"
+				)
+				option_actions+='[configure]'
+			fi
+
+			# coerce source
+			if [[ -n $option_share ]]; then # option under [check]
+				option_share="$(fs-path --resolve --no-validate -- "$option_share")"
+				gocryptfs_source="$option_share"
+				if ! is-mac; then
+					mount_source="$option_share"
+				fi
+				mounted_source="$option_share"
+				if [[ -n $fstab_type ]]; then
+					fstab_source="$(echo-fstab-encode -- "$option_share")"
+				fi
+
+				if [[ -n $option_target ]]; then # optional under [check]
+					# gocryptfs
+					gocryptfs_cmd=(
+						'gocryptfs'
+						"${gocryptfs_options[@]}"
+						"$gocryptfs_source"
+						"$option_target"
+					)
+				fi
+			fi
+
+		elif [[ -n $option_type ]]; then
+			# btrfs, filesystem, etc
+			mount_type="$option_type"
+			mounted_type="$option_type"
+			fstab_type="$option_type"
+			uses_mkdir='yes'
+			uses_root_for_mount='yes'
+			uses_root_for_unmount='yes'
+
+			if is-mac; then
+				fstab_options+=(
+					noatime    # ubuntu mount, macos mount, (not supported by gocryptfs)
+					nodev      # ubuntu mount, macos mount, gocryptfs mount
+					noexec     # ubuntu mount, macos mount, gocryptfs mount
+					noowners   # macos mount
+					nosuid     # macos mount, gocryptfs mount
+					quarantine # macos mount (undocumented)
+				)
+			else
+				fstab_options+=(
+					noatime # ubuntu mount, macos mount
+					nodev   # ubuntu mount, macos mount, gocryptfs mount
+					noexec  # ubuntu mount, macos mount, gocryptfs mount
+					rw      # ubuntu mount, macos mount has [rdonly], gocryptfs mount
+					user    # ubuntu mount
+					# X-mount.mkdir # ubuntu mount (doesn't work)
+				)
+			fi
+
+			# verify
+			# use --mount then --no-mount to prefer the node of the filesystem which is actually mounted
+			__do --redirect-status={temp_status} --redirect-stdout={temp} -- get-devices --missing= --result=node --mountable --mount --node="$option_share" --filesystem="$mount_type" --label="$option_label" --count="$option_count"
+			if [[ -z $temp || $temp_status == 6 ]]; then
+				# no mounted devices, so try unmounted devices
+				__do --redirect-status={temp_status} --redirect-stdout={temp} -- get-devices --missing= --result=node --mountable --no-mount --node="$option_share" --filesystem="$mount_type" --label="$option_label" --count="$option_count"
+			fi
+			if [[ -n $temp ]]; then
+				# get only the first line
+				option_share="$(echo-first-line --stdin <<<"$temp")"
+			fi
+			if [[ $temp_status == 0 && -n $temp ]]; then
+				__print_style --success='Validated' ' ' --invert="$option_share" ' ' --invert="$mount_type" ' ' --invert="$option_label" ' ' --invert="$option_count"
+			else
+				__print_style --error='Failed to validate' ' ' --invert="$option_share" ' ' --invert="$mount_type" ' ' --invert="$option_label" ' ' --invert="$option_count"
+				if [[ $option_actions == *'[unmount]'* ]]; then
+					__print_style --notice='As the goal is to unmount, we are continuing...'
+				else
+					return 5 # EIO 5 Input/output error
+				fi
+			fi
+
+			# coerce source
+			if [[ -n $option_share ]]; then # option under [check]
+				mount_source="$option_share"
+				mounted_source="$option_share"
+				fstab_source="$(echo-fstab-encode -- "$option_share")"
+			fi
+		fi
+
+		# coerce automount lines
+		if [[ -z $fstab_source || -z $fstab_type ]]; then
+			fstab_source=''
+			fstab_type=''
+			uses_fstab='no'
+		fi
+		if [[ -n $option_share ]]; then
+			cron_source="$(echo-escape-command -- "$option_share")"
+		fi
+		if [[ -n $option_target ]]; then
+			# cron
+			cron_target="$(echo-escape-command -- "$option_target")"
+			if [[ -n $option_share ]]; then
+				cron_args=(
+					"$(type -P dorothy | echo-escape-command --stdin)"
+					'run'
+					'--'
+					"$(type -P mount-helper | echo-escape-command --stdin)"
+					'--mount'
+					'--no-remount'
+					"--type=$(echo-escape-command -- "$option_type")"
+					"--own=$(echo-escape-command -- "$option_own")"
+					"--user=$(echo-escape-command -- "$option_user")"
+					"--group=$(echo-escape-command -- "$option_group")"
+					"--owner=$(echo-escape-command -- "$option_owner")"
+					"--username=$(echo-escape-command -- "$option_username")"
+					"--password=$(echo-escape-command -- "$option_password")"
+					"--server=$(echo-escape-command -- "$option_server")"
+					"--label=$(echo-escape-command -- "$option_label")"
+					"--count=$(echo-escape-command -- "$option_count")"
+					"--share=$cron_source"
+					"--target=$cron_target"
+				)
+				cron_line="*/15 * * * * $(stringify_args "${cron_args[@]}")"
+				# autodetect uses_cron
+				if [[ -z $option_cron ]]; then
+					if config-edit --cron-system --has --line="$cron_target" || config-edit --cron-user --has --line="$cron_target"; then
+						uses_cron='yes'
+					else
+						uses_cron='no'
+					fi
+				else
+					uses_cron="$option_cron"
+				fi
+			fi
+			# fstab
+			fstab_target="$(echo-fstab-encode -- "$option_target")"
+			if [[ -n $fstab_source && -n $fstab_type ]]; then
+				# autodetect uses_fstab
+				if [[ -z $uses_fstab ]]; then
+					uses_fstab="$option_fstab"
+				fi
+				if [[ -z $uses_fstab ]]; then
+					temp="$fstab_source $fstab_target $fstab_type"
+					if config-edit --fstab --has --line="$temp"; then
+						uses_fstab='yes'
+					else
+						uses_fstab='no'
+					fi
+				fi
+				# autodetect option_fstab, here as we still want autodetection even when uses_fstab is no (change their mind)
+				if [[ -z $option_automount ]]; then
+					temp="$fstab_source $fstab_target $fstab_type $(__print_join --delimiter=',' -- auto "${fstab_options[@]}") 0 0"
+					if config-edit --fstab --has --line="$temp"; then
+						option_automount='yes'
+					else
+						option_automount='no'
+					fi
+				fi
+				# generate the appropriate
+				if [[ $uses_fstab == 'yes' ]]; then
+					if [[ $option_automount == 'yes' ]]; then
+						fstab_line="$fstab_source $fstab_target $fstab_type $(__print_join --delimiter=',' -- auto "${fstab_options[@]}") 0 0"
+					else
+						fstab_line="$fstab_source $fstab_target $fstab_type $(__print_join --delimiter=',' -- noauto "${fstab_options[@]}") 0 0"
+					fi
+				fi
+			fi
+		fi
+		if [[ -n $fstab_target ]]; then
+			fstab_needle="$fstab_target"
+		else
+			fstab_needle="$fstab_source"
+		fi
+		if [[ -n $cron_target ]]; then
+			cron_needle="$cron_target"
+		else
+			cron_needle="$cron_source"
+		fi
+
+		# coerce commands
+		root_cmd=(eval-helper --inherit --elevate --)
+		exists_root_cmd+=("${root_cmd[@]}")
+		if [[ -n $option_user || -n $option_group ]]; then
+			owner_cmd=(eval-helper --inherit --elevate)
+			if [[ -n $option_user ]]; then
+				owner_cmd+=("--user=$option_user")
+			fi
+			if [[ -n $option_group ]]; then
+				owner_cmd+=("--group=$option_group")
+			fi
+			owner_cmd+=(--)
+		fi
+		if [[ -n $mount_source && -n $mount_type && -n $option_target ]]; then
+			# here for --parse debugging
+			if is-mac; then
+				mount_cmd+=(mount -v)
+			else
+				mount_cmd+=(mount --verbose)
+			fi
+			if [[ $uses_fstab == 'yes' ]]; then
+				mount_cmd+=("$option_target")
+			else
+				mount_cmd+=(
+					'-t' "$mount_type"
+				)
+				if [[ ${#fstab_options[@]} -ne 0 ]]; then
+					mount_cmd+=(-o)
+					__join --source={fstab_options} --delimiter=',' --append --target={mount_cmd}
+				fi
+				mount_cmd+=(
+					"$mount_source"
+					"$option_target"
+				)
+			fi
+		fi
+		if [[ -n $option_target ]]; then
+			rm_root_cmd=(
+				fs-remove --elevate --no-confirm-if-empty
+				--
+				"$option_target"
+			)
+			if [[ $uses_root_for_mount == 'yes' ]]; then
+				mounting_cmd+=("${root_cmd[@]}")
+				mkdir_cmd+=("${root_cmd[@]}")
+				rm_cmd+=(
+					fs-remove --elevate --no-confirm-if-empty
+					--
+					"$option_target"
+				)
+			elif [[ $uses_ownership == 'yes' ]]; then
+				mounting_cmd+=("${owner_cmd[@]}")
+				mkdir_cmd+=("${owner_cmd[@]}")
+
+				rm_cmd+=(fs-remove --no-confirm-if-empty)
+				if [[ -n $option_user ]]; then
+					rm_cmd+=("--user=$option_user")
+				fi
+				if [[ -n $option_group ]]; then
+					rm_cmd+=("--group=$option_group")
+				fi
+				rm_cmd+=(
+					--
+					"$option_target"
+				)
+			else
+				rm_cmd+=(
+					fs-remove --no-confirm-if-empty
+					--
+					"$option_target"
+				)
+			fi
+			if [[ $uses_ownership == 'yes' ]]; then
+				exists_cmd+=("${owner_cmd[@]}")
+				ls_cmd+=("${owner_cmd[@]}")
+			fi
+			if [[ $uses_fstab == 'yes' || $uses_root_for_unmount == 'yes' ]]; then
+				unmount_cmd+=("${root_cmd[@]}")
+				unmount_force_cmd+=("${root_cmd[@]}")
+			fi
+			if [[ $uses_fstab == 'yes' ]]; then
+				mounting_cmd+=("${mount_cmd[@]}")
+			elif [[ ${#open_cmd[@]} -ne 0 ]]; then
+				mounting_cmd+=("${open_cmd[@]}")
+			elif [[ ${#gocryptfs_cmd[@]} -ne 0 ]]; then
+				mounting_cmd+=("${gocryptfs_cmd[@]}")
+			elif [[ ${#mount_cmd[@]} -ne 0 ]]; then
+				mounting_cmd+=("${mount_cmd[@]}")
+			fi
+			exists_cmd+=(
+				test
+				-e
+				"$option_target"
+			)
+			exists_root_cmd+=(
+				test
+				-e
+				"$option_target"
+			)
+			ls_cmd+=(
+				ls
+				-la
+				"$option_target"
+			)
+			mkdir_cmd+=(
+				mkdir
+				-p
+				"$option_target"
+			)
+			if is-mac; then
+				unmount_cmd+=(
+					umount
+					-v
+					"$option_target"
+				)
+				unmount_force_cmd+=(
+					umount
+					-fv
+					"$option_target"
+				)
+			else
+				unmount_cmd+=(
+					umount
+					--verbose
+					--recursive
+					"$option_target"
+				)
+				unmount_force_cmd+=(
+					umount
+					--verbose
+					--recursive
+					--force
+					"$option_target"
+				)
+			fi
+		fi
+
+		# coerce check
+		if [[ -n $mounted_source ]]; then
+			check_source="$mounted_source on "
+		fi
+		if [[ -n $option_target ]]; then
+			check_target=" on $option_target "
+		fi
+		if [[ -n $mounted_type ]]; then
+			if is-mac; then
+				check_type+=" ($mounted_type"
+			else
+				check_type+=" type $mounted_type "
+			fi
+		fi
+
+		# coerce log
+		log_source="$option_type"
+		if [[ -n $option_own ]]; then
+			log_source+="[own=$option_own]"
+		fi
+		if [[ -n $option_user ]]; then
+			log_source+="[user=$option_user]"
+		fi
+		if [[ -n $option_group ]]; then
+			log_source+="[group=$option_group]"
+		fi
+		if [[ -n $option_owner ]]; then
+			log_source+="[owner=$option_owner]"
+		fi
+		if [[ -n $option_username ]]; then
+			log_source+="[username=$option_username]"
+		fi
+		if [[ -n $option_password ]]; then
+			log_source+="[password=redacted]"
+		fi
+		if [[ -n $option_server ]]; then
+			log_source+="[server=$option_server]"
+		fi
+		if [[ -n $option_label ]]; then
+			log_source+="[label=$option_label]"
+		fi
+		if [[ -n $option_count ]]; then
+			log_source+="[count=$option_count]"
+		fi
+		if [[ -n $option_share ]]; then
+			log_source+="[share=$option_share]"
+		fi
+
+		# helpers
+		function log_source_target {
+			if [[ -n $log_source ]]; then
+				__print_style --bold='source' ' = ' --code="$log_source"
+			fi
+			if [[ -n $option_target ]]; then
+				__print_style --bold='target' ' = ' --code="$option_target"
+			fi
+		}
+		function do_parse {
+			__print_line
+			__dump \
+				log_source option_actions option_remount option_source option_target \
+				mount_source mounted_source fstab_source open_source gocryptfs_source \
+				mount_type mounted_type fstab_type \
+				check_source check_target check_type \
+				fstab_line cron_line \
+				uses_ownership uses_fstab uses_cron uses_wait uses_mkdir uses_root_for_mount uses_root_for_unmount \
+				open_cmd gocryptfs_cmd mount_cmd mounting_cmd unmount_cmd unmount_force_cmd exists_cmd ls_cmd mkdir_cmd rm_cmd
+		}
+		function do_configure {
+			__print_style --h2='configure'
+
+			# add fuse config
+			# https://github.com/rfjakob/gocryptfs/blob/master/Documentation/MANPAGE.md#-allow_other
+			# https://github.com/rfjakob/gocryptfs/blob/a55b3cc15a6d9bce116a90f33df4bc99d9dd6a10/.github/workflows/ci.yml#L41
+			config-edit --fuse --line='user_allow_other'
+
+			# ensure sudo and cron are configured correctly for automounting
+			config-edit --local
+
+			__print_style --g2='configure'
+		}
+		function do_automount {
+			# prepare
+			__print_style --h2='automount'
+			local add_fstab_line add_cron_line
+
+			# determine
+			if [[ -n $fstab_line && $uses_fstab == 'yes' && ${1-} != 'remove' ]]; then
+				add_fstab_line='yes'
+			else
+				add_fstab_line='no'
+			fi
+			if [[ -n $cron_line && $uses_cron == 'yes' && ${1-} != 'remove' ]]; then
+				add_cron_line='yes'
+			else
+				add_cron_line='no'
+			fi
+
+			# fstab
+			if [[ -n $fstab_needle ]]; then
+				__print_style --h3='fstab'
+				if [[ -n $fstab_source ]]; then
+					__print_style --invert='fstab' ' is ' --positive='supported' ' for ' --code="$log_source"
+				else
+					__print_style --invert='fstab' ' is ' --negative='unsupported' ' for ' --code="$log_source"
+				fi
+				if [[ $add_fstab_line == 'yes' ]]; then
+					__print_style --invert='fstab' ' is ' --positive='desired.'
+				else
+					__print_style --invert='fstab' ' is ' --negative='undesired.'
+				fi
+				# apply
+				config-edit --fstab --line="$fstab_line" --needle="$fstab_needle" --add="$add_fstab_line"
+				__print_style --g3='fstab'
+			fi
+
+			# cron
+			if [[ -n $cron_needle ]]; then
+				__print_style --h3='cron'
+				if [[ -n $cron_line ]]; then
+					__print_style --invert='cron' ' is ' --positive='supported' ' for ' --code="$log_source"
+				else
+					__print_style --invert='cron' ' is ' --negative='unsupported' ' for ' --code="$log_source"
+				fi
+				if [[ $add_cron_line == 'yes' ]]; then
+					__print_style --invert='cron' ' is ' --positive='desired.'
+				else
+					__print_style --invert='cron' ' is ' --negative='undesired.'
+				fi
+				# apply
+				if [[ $uses_root_for_mount == 'yes' ]]; then
+					config-edit --cron-user --needle="$cron_target" --remove
+					config-edit --cron-system --line="$cron_line" --needle="$cron_target" --add="$add_cron_line"
+				else
+					config-edit --cron-system --needle="$cron_target" --remove
+					config-edit --cron-user --line="$cron_line" --needle="$cron_target" --add="$add_cron_line"
+				fi
+				__print_style --g3='cron'
+			fi
+
+			__print_style --g2='automount'
+		}
+		function scan_haystack_for_string_needle {
+			local filter="$1"
+			shift
+			for arg in "$@"; do
+				if [[ -n $arg ]]; then
+					filter="$(grep --fixed-strings --regexp="$arg" <<<"$filter" || :)"
+				fi
+			done
+			if [[ -n $filter ]]; then
+				__print_lines "$filter"
+			fi
+		}
+		local SHARED_CHECK_STATUS='' EXISTING_MOUNTS=()
+		function update_existing_mounts {
+			local haystack="$1"
+			if is-mac; then
+				__split --target={EXISTING_MOUNTS} --no-zero-length --invoke=try -- \
+					echo-regexp -ong --regexp=" on (.+?) \(" --replace='$1' -- "$haystack"
+			else
+				__split --target={EXISTING_MOUNTS} --no-zero-length --invoke=try -- \
+					echo-regexp -ong --regexp=" on (.+?) type " --replace='$1' -- "$haystack"
+			fi
+		}
+		function do_unmount_existing {
+			if [[ ${#EXISTING_MOUNTS[@]} -eq 0 ]]; then
+				return 0
+			fi
+			local existing_mount
+			for existing_mount in "${EXISTING_MOUNTS[@]}"; do
+				mount-helper --unmount \
+					"--type=$option_type" \
+					"--own=$option_own" \
+					"--user=$option_user" \
+					"--group=$option_group" \
+					"--owner=$option_owner" \
+					"--username=$option_username" \
+					"--password=$option_password" \
+					"--server=$option_server" \
+					"--label=$option_label" \
+					"--count=$option_count" \
+					"--share=$option_share" \
+					"--target=$existing_mount"
+			done
+		}
+		function do_check {
+			# update shared vars
+			SHARED_CHECK_STATUS=''
+			EXISTING_MOUNTS=()
+
+			# check if invalid
+			if [[ -z $check_source && -z $check_target && -z $check_type ]]; then
+				help '[--check] requires at least <source>, <target>, or <type>'
+			fi
+
+			# check
+			__print_style --h2='check mount entries'
+			local haystack found
+			haystack="$(mount)"
+			if [[ -n $check_type ]]; then
+				found="$(scan_haystack_for_string_needle "$haystack" "$check_type")"
+				if [[ -n $found ]]; then
+					SHARED_CHECK_STATUS+='[type-found]'
+					__print_style --positive='matching type:' ' ' --invert="$check_type" --newline --code="$found"
+					update_existing_mounts "$found" # used for when source and target are not defined
+				else
+					SHARED_CHECK_STATUS+='[type-missing]'
+					__print_style --negative='matching type:' ' ' --invert="$check_type" --newline --code='[[ type not mounted ]]'
+				fi
+			else
+				SHARED_CHECK_STATUS+='[type-unknown]'
+			fi
+			if [[ -n $check_source ]]; then
+				found="$(scan_haystack_for_string_needle "$haystack" "$check_source")"
+				if [[ -n $found ]]; then
+					SHARED_CHECK_STATUS+='[source-found]'
+					__print_style --positive="matching source: " --invert="$check_source" --newline --code="$found"
+					update_existing_mounts "$found" # override the earlier update from type
+				else
+					SHARED_CHECK_STATUS+='[source-missing]'
+					__print_style --negative="matching source: " --invert="$check_source" --newline --code='[[ source not mounted ]]'
+				fi
+			else
+				SHARED_CHECK_STATUS+='[source-unknown]'
+			fi
+			if [[ -n $check_target ]]; then
+				found="$(scan_haystack_for_string_needle "$haystack" "$check_target")"
+				if [[ -n $found ]]; then
+					SHARED_CHECK_STATUS+='[target-found]'
+					__print_style --positive='matching target:' ' ' --invert="$check_target" --newline --code="$found"
+				else
+					SHARED_CHECK_STATUS+='[target-missing]'
+					__print_style --negative='matching target:' ' ' --invert="$check_target" --newline --code='[[ target not mounted ]]'
+				fi
+			else
+				SHARED_CHECK_STATUS+='[target-unknown]'
+			fi
+			# @todo a nicety would be output extra matches, in case there is a perfect match but there are also other matches...
+			found="$(scan_haystack_for_string_needle "$haystack" "$check_type" "$check_source" "$check_target")"
+			if [[ -n $found ]]; then
+				SHARED_CHECK_STATUS+='[valid]'
+				__print_style --positive='matching expectation:' --newline --code="$found"
+				__print_style --g2='check mount entries'
+				return 0
+			else
+				__print_style --warning='matching expectation:' ' ' --invert="$check_target" --newline --code='[[ expectation not mounted ]]'
+				__print_style --e2='check mount entries'
+				return 0
+			fi
+		}
+		function do_unmount {
+			local goal='unmount' status
+			if [[ ${1-} == '--goal=mount' ]]; then
+				goal='mount'
+			fi
+
+			# remove from automount
+			if [[ $goal == 'unmount' ]]; then
+				do_automount 'remove'
+			fi
+
+			# it exists, check if mounted
+			local local_check_status=''
+			while :; do
+				# update check
+				do_check
+				local_check_status="$SHARED_CHECK_STATUS"
+				__print_style --h2='unmount'
+
+				# reminder to the user what they are working with
+				log_source_target
+
+				# process check
+				if [[ $local_check_status == *'[source-unknown][target-missing]'* ]]; then
+					__print_style --positive='Target not mounted.'
+					break # skip to cleanup
+				elif [[ $local_check_status == *'[source-missing][target-missing]'* ]]; then
+					__print_style --positive='Source not mounted.' ' ' --positive='Target not mounted.'
+					break                                                                          # skip to cleanup
+				elif [[ $local_check_status == *'[source-found][target-found][valid]'* ]]; then # needs both as unmounting with only --target and no source information is still [valid]
+					__print_style --positive="Correct source is mounted to correct target."
+					# if the goal is mounting, then check if they want to remount
+					if [[ $option_remount == 'yes' ]]; then
+						# remount
+						__print_style --notice="will remount..."
+						# continue to unmount
+					elif [[ $option_remount == 'no' ]]; then
+						# user changed their mind and doesn't want to ummount
+						if [[ $goal == 'mount' ]]; then
+							__print_style --positive="will skip..."
+							return 200 # ECUSTOM 200 Not applicable as already unmounted as desired
+						else
+							__print_style --warning='will abort...'
+							return 98 # EADDRINUSE 98 Address already in use
+						fi
+					elif [[ $goal == 'unmount' ]]; then
+						: # goal is to unmount, so continue to unmount
+					else
+						# already mounted, remount?
+						__try {status} -- \
+							confirm --linger --negative --ppid=-1 -- 'Do you wish to unmount to enable remounting?'
+						if [[ $status -eq 0 ]]; then
+							: # user wants to remount, so continue to unmount
+						elif [[ $status -eq 1 ]]; then
+							# user changed their mind and doesn't want to ummount
+							if [[ $goal == 'mount' ]]; then
+								__print_style --positive="will skip..."
+								return 200 # ECUSTOM 200 Not applicable as already unmounted as desired
+							else
+								__print_style --warning='will abort...'
+								return 98 # EADDRINUSE 98 Address already in use
+							fi
+						elif is-abort -- "$status"; then
+							__print_style --warning='will abort...'
+							return 98 # EADDRINUSE 98 Address already in use
+						else
+							# failure
+							__print_error 'An unexpected failure occurred.'
+							return "$status"
+						fi
+					fi
+				elif [[ $local_check_status == *'[source-missing][target-found]'* ]]; then
+					__print_style --positive='Source not mounted.' ' ' --negative='Target mounted to an unexpected source.'
+					__try {status} -- \
+						confirm --linger --positive --ppid=-1 -- 'Unmount the target to mount to the correct source?' '[y] to unmount, [n] to abort'
+					if [[ $status -eq 0 ]]; then
+						: # continue to unmount
+					elif [[ $status -eq 1 ]] || is-abort -- "$status"; then
+						__print_style --warning='will abort...'
+						return 98 # EADDRINUSE 98 Address already in use
+					else
+						# failure
+						__print_error 'An unexpected failure occurred.'
+						return "$status"
+					fi
+				elif [[ $local_check_status == *'[target-found]'* ]]; then
+					__print_style --positive='Target found.'
+					# continue to unmount
+				elif [[ $local_check_status == *'[source-missing][target-unknown]'* ]]; then
+					__print_style --positive='Source not mounted.'
+					break # skip to cleanup
+				elif [[ $local_check_status == *'[type-missing][source-unknown][target-unknown]'* ]]; then
+					__print_style --positive='Type not mounted.'
+					break # skip to cleanup
+				elif [[ $local_check_status == *'[type-found][source-unknown][target-unknown]'* ]]; then
+					if [[ ${#EXISTING_MOUNTS[@]} -eq 0 ]]; then
+						__print_style --positive='Type found.' ' ' --error='However, no targets found that can be unmounted.'
+						return 76 # EPROCUNAVAIL 76 Bad procedure for program
+					else
+						__print_style --positive='Type found.' ' ' --notice='Unmounting existing targets:' --newline \
+							--code="$(__print_lines "${EXISTING_MOUNTS[@]}")"
+						do_unmount_existing
+						continue # now that they should be unmounted, try again
+					fi
+				elif [[ $local_check_status == *'[source-found][target-unknown]'* ]]; then
+					if [[ ${#EXISTING_MOUNTS[@]} -eq 0 ]]; then
+						__print_style --positive='Source found.' ' ' --error='However, no targets found that can be unmounted.'
+						return 76 # EPROCUNAVAIL 76 Bad procedure for program
+					else
+						__print_style --positive='Source found.' ' ' --notice='Unmounting existing targets:' --newline \
+							--code="$(__print_lines "${EXISTING_MOUNTS[@]}")"
+						do_unmount_existing
+						continue # now that they should be unmounted, try again
+					fi
+				elif [[ $local_check_status == *'[source-found][target-missing]'* ]]; then
+					if [[ ${#EXISTING_MOUNTS[@]} -eq 0 ]]; then
+						__print_style --positive='Source found.' ' ' --error='However, no targets found that can be unmounted.'
+						return 76 # EPROCUNAVAIL 76 Bad procedure for program
+					else
+						__print_style --notice='Source is mounted to alternative targets:' --newline \
+							--code="$(__print_lines "${EXISTING_MOUNTS[@]}")" --newline \
+							--positive='Intended target is not mounted to any source:' --newline \
+							--code="$option_target"
+						__try {status} -- \
+							confirm --linger --positive --ppid=-1 -- 'Unmount the existing targets of the source?' '[y] to unmount existing targets, [n] to leave existing targets intact, [ctrl+c] to abort'
+						if [[ $status -eq 0 ]]; then
+							do_unmount_existing
+							continue # now that they should be unmounted, try again
+						elif [[ $status -eq 1 ]]; then
+							# we want to be an addition to this alternative target
+							break # skip to cleanup
+						elif is-abort -- "$status"; then
+							__print_style --warning='will abort...'
+							return 98 # EADDRINUSE 98 Address already in use
+						else
+							# failure
+							__print_error 'An unexpected failure occurred.'
+							return "$status"
+						fi
+					fi
+				else
+					__print_error "Unhandled mount status combination: $local_check_status"
+					return 76 # EPROCUNAVAIL 76 Bad procedure for program
+				fi
+
+				# verify unmount
+				if [[ -z $option_target ]]; then
+					__print_error "Unmount was triggered without a target for procedure: $local_check_status"
+					return 76 # EPROCUNAVAIL 76 Bad procedure for program
+				fi
+
+				# perform the unmount, no need for an existence check
+				# we already verified it earlier
+				__print_style --notice='Unmounting target...' ' ' --invert="$option_target"
+				__try {status} -- \
+					eval-helper --verbose --wrap -- "${unmount_cmd[@]}"
+				if [[ $status -eq 0 ]]; then
+					__print_style --positive='Unmounted.'
+					break # skip to cleanup
+				elif is-abort -- "$status"; then
+					__print_style --warning='will abort...'
+					return 98 # EADDRINUSE 98 Address already in use
+				else
+					# unmount failed, give information to the user to decide on force unmount
+					# https://github.com/rfjakob/gocryptfs/issues/459
+					what-is-using -- "$option_target"
+					__try {status} -- \
+						confirm --linger --positive --ppid=-1 -- '[y] to try again, [n] to force unmount, [ctrl+c] to abort'
+					if [[ $status -eq 0 ]]; then
+						# user doesn't want to force unmount, but just try again, perhaps they made a change somewhere else to make it successful
+						continue # try again
+					elif [[ $status -eq 1 ]]; then
+						# force unmount
+						__try {status} -- \
+							eval-helper --verbose --wrap -- "${unmount_force_cmd[@]}"
+						if [[ $status -eq 0 ]]; then
+							__print_style --positive='Unmounted forcefully.'
+							break # skip to cleanup
+						elif is-abort -- "$status"; then
+							__print_style --warning='will abort...'
+							return 98 # EADDRINUSE 98 Address already in use
+						else
+							__print_style --notice='Force unmount encountered a problem. Will check again...'
+							continue # try again
+						fi
+					elif is-abort -- "$status"; then
+						__print_style --warning='will abort...'
+						return 98 # EADDRINUSE 98 Address already in use
+					else
+						# failure
+						__print_error 'An unexpected failure occurred.'
+						return "$status"
+					fi
+				fi
+			done
+
+			# cleanup
+			if [[ -n $option_target ]]; then
+				# check if it exists as our intended user
+				__try {status} -- "${exists_cmd[@]}"
+				if [[ $status -eq 0 ]]; then
+					# log
+					__print_style --notice='Cleaning unmounted target...' ' ' --invert="$option_target"
+					# it exists as our intended user, so we can remove it as our intended user
+					if [[ $status -eq 0 ]]; then
+						"${rm_cmd[@]}" # eval, no need to eval wrap as it is noisy enough
+					fi
+					# check
+					__try {status} -- "${exists_cmd[@]}"
+					if [[ $status -eq 0 ]]; then
+						__print_style --warning='Failed to clean...'
+						return 66 # ENOTEMPTY 66 Directory not empty
+					fi
+					__print_style --positive='Cleaned unmounted target.'
+				else
+					# check if it exists as root
+					__try {status} -- "${exists_root_cmd[@]}"
+					if [[ $status -eq 0 ]]; then
+						# log
+						__print_style --notice='Cleaning unmounted target as root...' ' ' --invert="$option_target"
+						"${rm_root_cmd[@]}" # eval, no need to eval wrap as it is noisy enough
+						# check
+						__try {status} -- "${exists_root_cmd[@]}"
+						if [[ $status -eq 0 ]]; then
+							__print_style --warning='Failed to clean...'
+							return 66 # ENOTEMPTY 66 Directory not empty
+						fi
+						__print_style --positive='Cleaned unmounted target.'
+					fi # else it doesn't exist
+				fi
+			fi
+
+			# success
+			__print_style --g2='unmount'
+			return 0
+		}
+		function do_mount {
+			local unmount_status ls_status
+
+			# check if invalid
+			if [[ -z $option_share || -z $option_target ]]; then
+				help '[--mount] requires <share> and <target>'
+			fi
+
+			# verify mounting
+			if [[ ${#mounting_cmd[@]} -eq 0 ]]; then
+				__print_error "Unable to understand how to mount the source:" ' ' --code="$log_source"
+				return 22 # EINVAL 22 Invalid argument
+			fi
+
+			# unmount with appropriate handling for remounting
+			__try {unmount_status} -- do_unmount --goal=mount
+			if [[ $unmount_status -eq 200 ]]; then
+				__print_style --notice='Skipped remount.'
+				return 0
+			elif [[ $unmount_status -ne 0 ]]; then
+				__print_style --warning='Failed to unmount the target.'
+				return "$unmount_status"
+			fi
+
+			# segment
+			__print_style --h2='mount'
+
+			# validate gocryptfs here instead of during parsing, as if it is during parsing, it will crash if checking if an unmounted gocryptfs source is unmounted (e.g. /mnt/an-unmounted-hard-drive/a-gocryptfs-source)
+			if [[ -n $gocryptfs_source ]]; then
+				if ! gocryptfs-helper verify -- "$gocryptfs_source" --user="$option_user" --group="$option_group"; then
+					__print_error 'Failed to verify gocryptfs mount source:' ' ' --code="$gocryptfs_source"
+					return 22 # EINVAL 22 Invalid argument
+				fi
+			fi
+
+			# validate samba here instead of during parsing, for the same reason as gocryptfs
+			if [[ $mount_type == 'cifs' ]] && is-apt; then
+				# [cifs-utils] is necessary for [mount.cifs] which offers advanced samba mounting support, such as [iocharset] option
+				setup-util --quiet --cli='mount.cifs' APT='cifs-utils' # UBUNTU
+				# ensure UTF-8 encoding support
+				if is-missing -- "/lib/modules/$(uname -r)/kernel/fs/nls/nls_utf8.ko"; then
+					# https://askubuntu.com/a/1098865/22776 — install the minimal necessary for encoding
+					setup-util --quiet --name='UTF-8 Encoding' APT="linux-modules-extra-$(uname -r)"
+				fi
+			fi
+
+			# verify fstab
+			if [[ $uses_fstab == 'yes' ]]; then
+				do_automount
+			fi
+
+			# if not mounted, go through the process
+			if [[ $uses_mkdir == 'yes' ]]; then
+				# make the directory
+				# @todo consider some way to make the directory with the appropriate permissions so we don't have to adjust it after the fact
+				"${mkdir_cmd[@]}"
+
+				# then chown it, escalating to the parent if necessary
+				if [[ $uses_ownership == 'yes' ]]; then
+					eval-helper --verbose --wrap --shapeshifter -- \
+						fs-own --ug --owner="$option_owner" --user="$option_user" --group="$option_group" --recursive --parents -- \
+						"$option_target"
+				else
+					eval-helper --verbose --wrap --shapeshifter -- \
+						fs-own --ug --me --recursive --parents -- \
+						"$option_target"
+				fi
+
+				# then ls it
+				__try {ls_status} -- eval-helper --verbose --wrap -- "${ls_cmd[@]}"
+				if [[ $ls_status -ne 0 ]]; then
+					__print_style \
+						--notice1='Failed to access the mount target: ' --code-notice1="$option_target" --newline \
+						--notice='This is likely due to incorrect permissions on the target or its parent directories.'
+					return "$ls_status"
+				fi
+			fi
+
+			# mount
+			eval-helper --verbose --wrap -- \
+				"${mounting_cmd[@]}"
+
+			# wait
+			if [[ $uses_wait == 'yes' ]]; then
+				waiter --exists="$option_target"
+			fi
+
+			# chown
+			if [[ $uses_ownership == 'yes' ]] && ! __is_samba "$option_type"; then
+				eval-helper --verbose --wrap --shapeshifter -- \
+					fs-own --ug --owner="$option_owner" --user="$option_user" --group="$option_group" --recursive -- \
+					"$option_target"
+			fi
+
+			# ls
+			# 0 = ok
+			# 1 = minor problem (e.g., cannot access subdirectory)
+			# 2 = serious trouble (e.g., cannot access command-line argument)
+			__try {ls_status} -- eval-helper --verbose --wrap -- "${ls_cmd[@]}"
+			if [[ $ls_status -eq 1 ]]; then
+				__print_style --notice='Listing failed to access a subdirectory, but that is okay.'
+			elif [[ $ls_status -ne 0 ]]; then
+				__print_style --warning='Failed to list the target.'
+				return "$ls_status"
+			fi
+
+			# log
+			__print_style --success='Successfully mounted' ' ' --invert="$log_source" ' ' --success='to' ' ' --invert="$option_target" --newline --g2='mount'
+		}
+
+		# =====================================
+		# Action
+
+		function do_action {
+			# parse
+			if [[ $option_actions == *'[parse]'* ]]; then
+				do_parse
+			fi
+
+			# check
+			if [[ $option_actions == *'[check]'* ]]; then
+				do_check
+				if [[ -z $SHARED_CHECK_STATUS ]]; then
+					return 1
+				fi
+			fi
+
+			# config
+			# done here to prevent double running on --automount --mount dual use
+			if [[ $option_actions == *'[configure]'* || $option_fstab == 'yes' || $option_cron == 'yes' ]]; then
+				do_configure
+			fi
+
+			# unmount
+			if [[ $option_actions == *'[unmount]'* ]]; then
+				do_unmount
+			fi
+
+			# automount
+			if [[ -n $option_automount ]]; then
+				do_automount
+			fi
+
+			# mount
+			if [[ $option_actions == *'[mount]'* ]]; then
+				do_mount
+			fi
+		}
+
+		# do the action with correct logging
+		local action_status
+		__print_style --h2="$title"
+		log_source_target
+		__try {action_status} -- do_action
+		log_source_target
+		if [[ $action_status -eq 0 ]]; then
+			__print_style --g2="$title"
+		else
+			__print_style --e2="$title"
+			return "$action_status"
+		fi
+	}
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			USAGE:
+			mount-helper [--] [...options]
+
+			OPTIONS:
+
+			Actions can be combined, however at least one is required:
+			--action=<parse|check|mount|unmount|automount|noautomount>
+			[--parse]
+			    Outputs the parsed formats.
+			[--check|--mounted]
+			[--mount]
+			[--unmount]
+
+			[--[no-]automount]
+			    Enable/disable fstab and cron if supported.
+			[--[no-]fstab]
+			    Enable/disable fstab if supported.
+			[--[no-]cron]
+			    Enable/disable cron if supported.
+
+			Only one type can be specified:
+			--type=samba|gocryptfs|btrfs|<filesystem>
+			[--samba|smb|smbfs|cifs]
+			[--gocryptfs|fuse.gocryptfs]
+			[--btrfs|<filesystem>]
+
+			Mount target permissions:
+			[--user=<user>]
+			[--group=<group>]
+			[--owner=<owner>]
+
+			Source connection permissions:
+			[--username=<username>]
+			    Applicable to <samba>.
+			[--password=<password>]
+			    Applicable to <samba> and <gocryptfs>.
+			[--server=<server>]
+			    Applicable to <samba>.
+
+			[--label=<label>]
+			    When using <filesystem>, this is the <label> of the source device.
+			    Can infer the <share> from it.
+			[--count=<count>]
+			    When using <filesystem>, this is the amount of devices that comprise the filesystem.
+
+			--share=<share>
+			    When using <samba>, this is the share name.
+			    When using <gocryptfs>, this is the vault path.
+			    When using <filesystem>, this is the /dev/... path.
+
+			--target=<target>
+			    This is the mount location.
+			    If <samba> and MacOS, this is inferred as /Volumes/<share>
+
+			USAGE:
+
+			mount-helper -- \
+				--action=... --type=btrfs --share='/dev/...' --target='/Volumes/folder' -- \
+				--action=... --btrfs [--label='...'] [--count=...] [--share='/dev/...'] --target='/Volumes/folder' -- \
+				--action=... --gocryptfs --share='/path/to/vault' --target='/Volumes/folder' -- \
+				--action=... --samba --server='ip' --share='folder' --target='/Volumes/folder' -- \
+				--automount --samba --username='user' --password='pass' --server='ip' --share='folder' --target='/Volumes/folder'
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+
+		'--parse') option_actions+='[parse]' ;;
+		'--mount') option_actions+='[mount]' ;;
+		'--unmount') option_actions+='[unmount]' ;;
+		'--configure') option_actions+='[configure]' ;;
+		'--check' | '--mounted') option_actions+='[check]' ;;
+
+		'--no-automount'* | '--automount'*) __flag --source={item} --target={option_automount} --affirmative ;;
+		'--no-cron'* | '--cron'*) __flag --source={item} --target={option_cron} --affirmative ;;
+		'--no-fstab'* | '--fstab'*) __flag --source={item} --target={option_fstab} --affirmative ;;
+		'--no-remount'* | '--remount'*) __flag --source={item} --target={option_remount} --affirmative ;;
+
+		'--type='*) option_type="${item#*=}" ;;
+		'--samba' | '--smb' | '--smbfs' | '--cifs') option_type='samba' ;;
+		'--gocryptfs' | '--fuse.gocryptfs') option_type='gocryptfs' ;;
+		'--btrfs') option_type='btrfs' ;;
+
+		'--user='*) option_user="${item#*=}" ;;
+		'--group='*) option_group="${item#*=}" ;;
+		'--owner='*) option_owner="${item#*=}" ;;
+		'--no-own'* | '--own'*) __flag --source={item} --target={option_own} --affirmative ;;
+
+		'--username='*) option_username="${item#*=}" ;;
+		'--password='*) option_password="${item#*=}" ;;
+		'--server='*) option_server="${item#*=}" ;;
+
+		'--label='*) option_label="${item#*=}" ;;
+		'--count='*) option_count="${item#*=}" ;;
+
+		'--share='*) option_share="${item#*=}" ;;
+		'--source='*) option_source="${item#*=}" ;;
+		'--target='*) option_target="${item#*=}" ;;
+		'--')
+			# act on prior group
+			action
+			reset
+			;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# act on remaining group
+	action
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	mount_helper "$@"
+fi

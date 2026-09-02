@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+function get_url_protocol_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	eval-tester --name='ok using arguments' --stdout='https' -- \
+		get-url-protocol -- 'https://bevry.me'
+
+	{
+		printf '%s' 'https://bevry.me'
+	} | eval-tester --name='ok using stdin' --stdout='https' -- \
+		get-url-protocol --stdin
+
+	eval-tester --name='not ok using arguments' --ignore-stderr --status=1 -- \
+		get-url-protocol -- 'bevry.me'
+
+	{
+		printf '%s' 'bevry.me'
+	} | eval-tester --name='not ok using stdin' --ignore-stderr --status=1 -- \
+		get-url-protocol --stdin
+
+	return 0
+)
+function get_url_protocol() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the protocol of URL
+
+			USAGE:
+			get-url-protocol [...options] [--] ...<input>
+			echo-lines ...<input> | get-url-protocol [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			get-url-protocol -- 'https://bevry.me'
+
+			    https
+			    # exit status: 0
+
+			printf '%s' 'https://bevry.me' | get-url-protocol --stdin
+
+			    https
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	local deno_script
+	deno_script="$(type -P 'get-url-protocol.ts')"
+
+	function __on_piece {
+		"$deno_script" "$1" || return $?
+		# echo-regexp -f '^([a-z]+)://.*$' '$1' -- "$1"
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		get_url_protocol_test
+	else
+		get_url_protocol "$@"
+	fi
+fi

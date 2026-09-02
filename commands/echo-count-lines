@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+
+function echo_count_lines_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	eval-tester --name='args, one blank line' --stdout='0' -- \
+		echo-count-lines -- ''
+
+	eval-tester --name='args, one blank line' --stdout='0' -- \
+		echo-count-lines --no-inline -- ''
+
+	eval-tester --name='args, one incomplete line' --stdout='1' -- \
+		echo-count-lines -- 'a'
+
+	eval-tester --name='args, one incomplete line' --stdout='0' -- \
+		echo-count-lines --no-inline -- 'a'
+
+	eval-tester --name='args, one newline' --stdout='1' -- \
+		echo-count-lines -- $'\n'
+
+	eval-tester --name='args, one newline' --stdout='1' -- \
+		echo-count-lines --no-inline -- $'\n'
+
+	eval-tester --name='args, one complete line' --stdout='1' -- \
+		echo-count-lines -- $'a\n'
+
+	eval-tester --name='args, one complete line' --stdout='1' -- \
+		echo-count-lines --no-inline -- $'a\n'
+
+	eval-tester --name='args, one complete line, one incomplete line' --stdout='2' -- \
+		echo-count-lines -- $'a\nb'
+
+	eval-tester --name='args, one complete line, one incomplete line' --stdout='1' -- \
+		echo-count-lines --no-inline -- $'a\nb'
+
+	eval-tester --name='multi args is not supported' --status=22 --ignore-stderr -- \
+		echo-count-lines -- 'a' ''
+
+	# eval-tester --name='multi args, one incomplete line, one blank line' --stdout='1' \
+	# 	-- echo-count-lines -- 'a' ''
+
+	# eval-tester --name='multi args, one incomplete line, one blank line' --stdout='0' \
+	# 	-- echo-count-lines --no-inline -- 'a' ''
+
+	# eval-tester --name='multi args, one incomplete line, one newline' --stdout='2' \
+	# 	-- echo-count-lines -- 'a' $'\n'
+
+	# eval-tester --name='multi args, one incomplete line, one newline' --stdout='1' \
+	# 	-- echo-count-lines --no-inline -- 'a' $'\n' # only newline is counted
+
+	# eval-tester --name='multi args, one incomplete line, one newline, one blank line' --stdout='2' \
+	# 	-- echo-count-lines -- 'a' $'\n' ''
+
+	# eval-tester --name='multi args, one incomplete line, one newline, one blank line' --stdout='1' \
+	# 	-- echo-count-lines --no-inline -- 'a' $'\n' '' # only newline is counted
+
+	# eval-tester --name='multi args, one incomplete line, one newline, one blank line, one incomplete line, one newline, one blank line' --stdout='4' \
+	# 	-- echo-count-lines -- 'a' $'\n' '' 'b' $'\n' ''
+
+	# eval-tester --name='multi args, one incomplete line, one newline, one blank line, one incomplete line, one newline, one blank line' --stdout='2' \
+	# 	-- echo-count-lines --no-inline -- 'a' $'\n' '' 'b' $'\n' '' # only the two newlines are counted
+
+	{
+		printf '%s' 'a'
+	} | eval-tester --name='stdin, one incomplete line' --stdout='1' -- \
+		echo-count-lines --stdin
+
+	{
+		printf '%s' 'a'
+	} | eval-tester --name='stdin, one incomplete line' --stdout='0' -- \
+		echo-count-lines --stdin --no-inline
+
+	{
+		printf '%s' $'a\n'
+	} | eval-tester --name='stdin, one complete line' --stdout='1' -- \
+		echo-count-lines --stdin
+
+	{
+		printf '%s' $'a\n'
+	} | eval-tester --name='stdin, one complete line' --stdout='1' -- \
+		echo-count-lines --stdin --no-inline
+
+	{
+		printf '%s' $'a\nb'
+	} | eval-tester --name='stdin, one complete line, one incomplete line' --stdout='2' -- \
+		echo-count-lines --stdin
+
+	{
+		printf '%s' $'a\nb'
+	} | eval-tester --name='stdin, one complete line, one incomplete line' --stdout='1' -- \
+		echo-count-lines --stdin --no-inline
+
+	return 0
+)
+function echo_count_lines() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Output how many lines in the <input>.
+
+			USAGE:
+			echo-count-lines [...options] [--] <input>
+			echo-lines ...<input> | echo-count-lines [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			QUIRKS:
+			This does not wrap lines. If you want wrapped lines, send to echo-wrap first, then pipe to echo-count-lines.
+
+			Only a single <input> argument is supported, as multiple <input> arguments is ambiguous, do you want the count for each argument, or the total?
+
+			EXAMPLE:
+
+			echo-count-lines -- $'1\n23\n4'
+
+			    3
+			    # exit status: 0
+
+			echo-count-lines --no-inline -- $'1\n23\n4'
+
+			    2
+			    # exit status: 0
+
+			printf '%s' $'1\n2' | echo-count-lines --stdin
+
+			    2
+			    # exit status: 0
+
+			printf '%s' $'1\n2' | echo-count-lines --stdin --no-inline
+
+			    1
+			    # exit status: 0
+
+			echo-lines -- 1 2 | echo-count-lines --stdin
+
+			    2
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	local lines=0
+	function __on_line {
+		lines="$((lines + 1))"
+	}
+	function __on_finish {
+		__print_lines "$lines" || return $?
+	}
+	stdinargs --max-args=1 "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		echo_count_lines_test
+	else
+		echo_count_lines "$@"
+	fi
+fi

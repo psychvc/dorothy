@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+
+function edit_() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Open your preferred editor.
+
+			USAGE:
+			edit [...options] [-- ...<path>]
+
+			OPTIONS:
+			-- ...<path>
+			    Open the editor to this <path>.
+
+			--dry
+			    If enabled, output the editor instead of invoking it.
+			--only-editor
+			    If enabled, only output the editor command, and not any arguments.
+			    Enforces --dry.
+
+			--prompt
+			    If enabled (the default), support editors that require additional arguments to edit the file.
+
+			--wait
+			    If disabled (the default), edit the file but skip waiting for the editor to close the file.
+
+			--terminal
+			    If enabled, enforce a terminal editor.
+
+			--gui
+			    If enabled, enforce a gui editor.
+
+			--elevated=<elevated>
+			--elevate=<elevate>
+			    If enabled, the editor will be opened with elevated privileges.
+			    If disabled, auto-elevation will not occur even if elevated privileges are necessary.
+			--user=<user>
+			--group=<group>
+			--reason=<reason>
+			    Forwarded to [eval-helper].
+
+			[...all other options forwarded to the editor]
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process, @todo rewrite with option_ prefix
+	local item option_dry='no' option_prompt='yes' option_wait='no' option_only_editor='no' option_terminal='' option_gui='' option_paths=() option_args=() option_elevated='' option_elevate='' option_user='' option_group='' option_reason=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--no-dry'* | '--dry'*) __flag --source={item} --target={option_dry} --affirmative ;;
+		'--no-prompt'* | '--prompt'*) __flag --source={item} --target={option_prompt} --affirmative ;;
+		'--no-wait'* | '--wait'*) __flag --source={item} --target={option_wait} --affirmative ;;
+		'--no-only-editor'* | '--only-editor'*) __flag --source={item} --target={option_only_editor} --affirmative ;;
+		'--no-terminal'* | '--terminal'*) __flag --source={item} --target={option_terminal} --affirmative ;;
+		'--no-gui'* | '--gui'*) __flag --source={item} --target={option_gui} --affirmative ;;
+		# <elevate>
+		'--elevated='*) option_elevated="${item#*=}" ;;
+		'--no-elevate'* | '--elevate'*) __flag --source={item} --target={option_elevate} --affirmative --no-coerce ;;
+		'--user='*) option_user="${item#*=}" ;;
+		'--group='*) option_group="${item#*=}" ;;
+		'--reason='*) option_reason="${item#*=}" ;;
+		# </elevate>
+		'.' | '..') option_paths+=("$item") ;;
+		'--')
+			option_paths+=("$@")
+			shift "$#"
+			break
+			;;
+		*) option_args+=("$item") ;;
+		esac
+	done
+
+	# check that terminal and gui are not both no
+	if [[ $option_terminal == 'no' && $option_gui == 'no' ]]; then
+		help "either [--terminal] or [--gui] must be enabled."
+	fi
+
+	# =====================================
+	# Configuration
+
+	source "$DOROTHY/sources/config.sh"
+
+	# editors.bash provides:
+	local TERMINAL_EDITORS=() GUI_EDITORS=()
+	load_dorothy_config 'editors.bash'
+
+	# check config
+	if [[ ${#TERMINAL_EDITORS[@]} -eq 0 ]]; then
+		__print_style --stderr --warning='TERMINAL_EDITORS was undefined' || return $?
+	fi
+	if [[ ${#GUI_EDITORS[@]} -eq 0 ]]; then
+		__print_style --stderr --warning='GUI_EDITORS was undefined' || return $?
+	fi
+
+	# helpers
+	function __is_terminal_editor {
+		__has --source={TERMINAL_EDITORS} -- "$1" || return $?
+	}
+	function __is_gui_editor {
+		__has --source={GUI_EDITORS} -- "$1" || return $?
+	}
+
+	# =====================================
+	# Action
+
+	# determine the editors
+	local editors=()
+	if [[ -z $option_terminal && -z $option_gui ]]; then
+		# no terminal or gui preference, determine sensible defaults
+		if is-vscode; then
+			# if running within vscode, add vscode as first preference
+			editors+=(code)
+			option_gui='yes'
+			option_terminal='yes'
+		elif is-ssh || is-headless; then
+			# if terminal, only use terminal editors
+			option_gui='no'
+			option_terminal='yes'
+		else
+			# if desktop, enable terminal and gui editors
+			option_gui='yes'
+			option_terminal='yes'
+		fi
+	fi
+	if [[ $option_gui == 'yes' ]]; then
+		# add the gui editors if desired
+		editors+=("${GUI_EDITORS[@]}")
+	fi
+	if [[ $option_terminal == 'yes' ]]; then
+		# add the terminal editors if desired
+		editors+=("${TERMINAL_EDITORS[@]}")
+	fi
+	# auto-elevation
+	if [[ ${#option_paths[@]} -ne 0 ]]; then
+		if [[ -z $option_elevated ]]; then
+			option_elevated="$(mktemp)"
+		fi
+		is-touchable --elevated="$option_elevated" --elevate="13 93 $option_elevate" --user="$option_user" --group="$option_group" --reason="$option_reason" -- "${option_paths[@]}"
+		if [[ -s $option_elevated ]]; then
+			option_elevate='yes'
+		fi
+	fi
+
+	# filter options by available
+	local cmd=() editor command
+	# trunk-ignore(shellcheck/SC2034)
+	for editor in "${editors[@]}"; do
+		cmd=()
+		__split --source={editor} --target={cmd} --delimiters=$'\n ' --no-zero-length
+		command="${cmd[0]}"
+		if [[ -n $command ]]; then
+			if __command_exists -- "$command"; then
+				# absolute path so sudo has availability: may not actually be necessary
+				# array[0]="$(fs-path --absolute -- "${array[0]}")"
+
+				# handle fancy editors fancifully
+				case "$command" in
+				'code')
+					# requires prompt, and cannot elevate
+					if [[ $option_prompt == 'no' || $option_elevate == 'yes' ]]; then
+						continue
+					fi
+					if is-kde; then
+						# https://code.visualstudio.com/docs/editor/settings-sync#_recommended-configure-the-keyring-to-use-with-vs-code
+						if __command_missing -- kwalletmanager5; then
+							setup-util --quiet --cli=kwalletmanager5 APT='kwalletmanager'
+						fi
+						cmd+=('--password-store=gnome-libsecret') # kwallet5
+					fi
+					if [[ $option_wait == 'yes' ]]; then
+						cmd+=('-w')
+					fi
+					if is-wsl; then # @todo is-wsl or is-windows is better?
+						cmd+=('--reuse-window')
+					else
+						# on wsl, --new-window causes git to wait forever to close the file
+						cmd+=('--new-window')
+					fi
+					;;
+				'atom' | 'subl' | 'zed')
+					# requires prompt and cannot elevate
+					if [[ $option_prompt == 'no' || $option_elevate == 'yes' ]]; then
+						continue
+					fi
+					if [[ $option_elevate == 'yes' ]]; then
+						continue
+					fi
+					if [[ $option_wait == 'yes' ]]; then
+						cmd+=('-w')
+					fi
+					;;
+				'emacs')
+					# requires prompt
+					if [[ $option_prompt == 'no' ]]; then
+						continue
+					fi
+					cmd+=('--no-window-system')
+					;;
+				esac
+
+				# we have a suitable editor, add the paths and leave the search
+				cmd+=("${option_args[@]}" "${option_paths[@]}")
+				break
+			elif [[ $option_gui == 'yes' ]] && __is_gui_editor "$command" && get-app --quiet -- "$command"; then
+				# if elevating, ignore editors that can't elevate
+				if [[ $option_elevate == 'yes' && $command =~ ^(TextEdit)$ ]]; then
+					continue
+				fi
+
+				# apps require prompts
+				if [[ $option_prompt == 'yes' ]]; then
+					cmd=('open' '-a' "${cmd[@]}" "${option_args[@]}" "${option_paths[@]}")
+					# we have a suitable editor, leave the search
+					break
+				fi
+			fi
+			# continue to the next editor
+		fi
+	done
+
+	# check editor
+	if [[ ${#cmd[@]} -eq 0 ]]; then
+		if [[ $option_dry == 'yes' && -n $CI ]]; then
+			: # if running on ci, and if dry, then suppress error
+		else
+			__print_style --stderr --error="$0: None of the configured editors were available." || :
+		fi
+		return 42 # ENOPROTOOPT 42 Protocol not available
+	fi
+
+	# handle result
+	if [[ $option_only_editor != 'no' ]]; then
+		# only output the editor
+		__print_lines "${cmd[0]}"
+		return $?
+	elif [[ $option_dry == 'yes' ]]; then
+		# print a single line, with values space separated, such that [setup-git] works properly with [code --new-window]
+		__print_lines "${cmd[*]}"
+	else
+		# run the editor
+		eval-helper --inherit --elevated="$option_elevated" --elevate="$option_elevate" --user="$option_user" --group="$option_group" --reason="$option_reason" -- \
+			"${cmd[@]}"
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	edit_ "$@"
+fi

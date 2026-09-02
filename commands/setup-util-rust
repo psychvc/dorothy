@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+function setup_util_rust() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=rustup "$@"; then
+		return 0
+	fi
+
+	# enable EVAL_INSTALL, etc
+	source "$(type -P setup-util)"
+
+	# clean
+	if __is_brew && [[ -n "$(brew-installed -- rustup rust || :)" ]]; then
+		if confirm --linger --positive --ppid=$$ -- 'Rust is currently installed via homebrew. Confirm that you want Dorothy to use rustup to manage rust instead. Rustup is the official and only endorsed method of managing Rust.'; then
+			brew uninstall -f rustup rust
+		fi
+	fi
+
+	# helpers
+	function rust_install {
+		# dependencies
+		setup-util-devel --quiet
+
+		# https://rust-lang.github.io/rustup/installation/other.html
+		# rustup: Unable to run interactively. Run with -y to accept defaults, --help for additional options
+		# stdout to /dev/null as it useless stuff goes to stdout, useful stuff goes to stderr
+		fetch 'https://sh.rustup.rs' | sh -s -- --quiet --no-modify-path -y >/dev/null
+	}
+	function rust_upgrade {
+		if __command_exists -- rustup; then
+			rustup update
+		else
+			rust_install "$@"
+		fi
+	}
+	function rust_uninstall {
+		rustup self uninstall
+	}
+
+	# setup
+	local options=(
+		--cli='rustup'
+		"$@"
+		EVAL_INSTALL='rust_install'
+		EVAL_UPGRADE='rust_upgrade'
+		EVAL_UNINSTALL='rust_uninstall'
+	)
+	setup_util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_rust "$@"
+fi

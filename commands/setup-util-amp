@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# https://github.com/jmacdonald/amp
+# vim alternative
+
+# https://github.com/jmacdonald/amp/releases
+# no builds provided in releases
+
+function setup_util_amp() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='amp'
+		"$@"
+		BREW='amp'
+		CARGO='amp'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_amp "$@"
+fi

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+function echo_escape_backslashes() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			For each <input>, escape backslashes.
+
+			USAGE:
+			echo-escape-backslashes [...options] [--] ...<input>
+			echo-lines ...<input> | echo-escape-backslashes [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-escape-backslashes -- 'Special: \040b'
+
+			    Special: \\\\040b
+			    # exit status: 0
+
+			echo-lines -- 'Special: \040b' | echo-escape-backslashes --stdin
+
+			    Special: \\\\040b
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function __on_whole {
+		local value="$1"
+		value="${value//\\/\\\\}"
+		__print_piece "$value" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_escape_backslashes "$@"
+fi

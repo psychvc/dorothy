@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+function icloud_helper() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# assert compatibility
+	if ! is-mac; then
+		__print_style --stderr --notice="[$0] is only intended to be run on macOS systems, skipping." || return $?
+		return 0
+	fi
+
+	# =====================================
+	# Arguments
+
+	function help {
+		__print_help "$@" <<-EOF || return $?
+			USAGE:
+			\`icloud-helper <action>\`
+
+			ACTIONS:
+			status
+			    Get the current sync status of iCloud Drive.
+
+			evict -- ...<file>
+			    Evict a file or files from the local iCloud Drive, keeping the paths remotely.
+
+			clean
+			    Evict everything from the local iCloud Drive, keeping everything remotely.
+
+			size
+			    Get the size of the local iCloud Drive.
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action='' option_args=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_args+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# check
+	if [[ -z $action ]]; then
+		help "No <action> was provided."
+	fi
+
+	# =====================================
+	# Dependencies
+
+	__command_required -- 'find' || return $?
+
+	# =====================================
+	# Actions
+
+	function clean {
+		find "$HOME/Library/Mobile Documents/com~apple~CloudDocs" -type f -exec "$0" evict -- {} \;
+	}
+
+	function evict {
+		local path
+		for path in "$@"; do
+			# .DS_Store files are not added to iCloud Drive
+			# .icloud files are placeholders for non-local files
+			# .screenflow does not play nicely with iCloud Drive, as it is a secret directory
+			if [[ ! -d $path && $path != *".DS_Store" && $path != *".icloud" ]]; then
+				if [[ $path == *".screenflow"* || $path == *".sketch"* ]]; then
+					__print_lines "skipped $path, as it is a directory in disguise as a file, and can only evict files"
+				else
+					brctl evict "$path"
+				fi
+			else
+				__print_lines "skipped $path, as it is a directory or excluded path"
+			fi
+		done
+	}
+
+	function status {
+		brctl status com.apple.CloudDocs
+	}
+
+	function size {
+		get-size -- "$HOME/Library/Mobile Documents/com~apple~CloudDocs"
+	}
+
+	# =====================================
+	# Action
+
+	__affirm_function_is_defined "$action"
+	"$action" "${option_args[@]}" # eval
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	icloud_helper "$@"
+fi

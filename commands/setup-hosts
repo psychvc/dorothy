@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+
+function setup_hosts() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Adapt your system's hosts configuration to the desired values.
+
+			USAGE:
+			setup-hosts
+			# ^ use your prior configuration, or if there is none, prompt for configuration
+
+			setup-hosts --configure
+			# ^ force reconfiguration
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_configure='no'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--no-configure'* | '--configure'*) __flag --source={item} --target={option_configure} --affirmative ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Dependencies
+
+	local bin_gsed_or_sed
+	bin_gsed_or_sed="$(echo-gnu-command --install -- gsed)"
+
+	# =====================================
+	# Start
+
+	__print_style --h1='Setup Hosts file'
+
+	# =====================================
+	# Configuration
+
+	source "$DOROTHY/sources/config.sh"
+
+	# hosts.bash provides:
+	local OPTIONS=() CHOICE=''
+	load_dorothy_config 'hosts.bash'
+
+	# adjustments
+	if [[ -z $CHOICE || $option_configure == 'yes' ]]; then
+		if [[ ${#OPTIONS[@]} -eq 0 ]]; then
+			help 'Invalid configuration, there must be valid OPTIONS.'
+		fi
+		CHOICE="$(
+			choose \
+				--question='Which host file do you wish to use?' \
+				--label=first -- 'No custom hosts file.' 'system' "${OPTIONS[@]}"
+		)"
+	fi
+
+	# turn empty choice into system
+	if [[ -z $CHOICE ]]; then
+		CHOICE='system'
+	fi
+
+	# =====================================
+	# Action
+
+	# prepare
+	local hosts_file='/etc/hosts'
+
+	# helper
+	function apply_hosts_file {
+		# prepare
+		local url root custom_file content_file combined_file hostname
+		url="$1"
+		root="$(fs-temp --directory='dorothy' --directory='setup-hosts')"
+		custom_file="$(fs-temp --root="$root" --file='custom_file' --touch)"
+		content_file="$(fs-temp --root="$root" --file='content_file' --touch)"
+		combined_file="$(fs-temp --root="$root" --file='combined_file' --touch)"
+		hostname="$(get-hostname)"
+
+		# log
+		__print_style --bold='Applying' ' ' --url="$url" ' to ' --path="$hosts_file" ' ...'
+
+		# prepare defaults in case of failure
+		cat <<-EOF >"$content_file"
+			127.0.0.1 localhost
+
+			# The following lines are desirable for IPv6 capable hosts
+			::1 ip6-localhost ip6-loopback
+			fe00::0 ip6-localnet
+			ff00::0 ip6-mcastprefix
+			ff02::1 ip6-allnodes
+			ff02::2 ip6-allrouters
+			ff02::3 ip6-allhosts
+		EOF
+
+		# grab the custom content, and save it temporarily
+		# @todo test this if there was no match
+		# @todo replace with `echo-regexp` and `echo-write`
+		function __save_custom_segment {
+			"$bin_gsed_or_sed" -n '/<custom>/,/<\/custom>/p' <"$hosts_file" >"$custom_file"
+		}
+		if ! __save_custom_segment; then
+			cat <<-EOF >"$custom_file"
+				# <custom>
+				# </custom>
+			EOF
+		fi
+
+		# if we have a new file
+		if [[ -n $url && $url != 'system' ]]; then
+			__print_style --dim 'Upgrading existing hosts file with data from ' --url="$url"
+
+			# download the new file to a temporary location
+			down "$url" --filepath="$content_file" || :
+
+			# combine the parts
+			cat -- "$custom_file" "$content_file" >"$combined_file"
+		else
+			__print_style --dim 'Upgrading existing hosts file.'
+
+			# combine the parts
+			cat -- "$custom_file" "$content_file" >"$combined_file"
+		fi
+
+		# ensure the hostname exists
+		"$bin_gsed_or_sed" --null-data --in-place --regexp-extended \
+			--expression="s#(\s+)localhost\n#\1localhost\n127.0.0.1\1$hostname\n#" \
+			"$combined_file"
+
+		# combine the custom content with the new content, and save it to the destination
+		eval-helper --elevate --reason='Your password is required to momentarily grant privileges to write the changes to the system hosts file:' -- mv -f -- "$combined_file" "$hosts_file"
+
+		# fix permissions, otherwise `sudo systemctl status systemd-resolved` could fail with:
+		# Failed to open /etc/hosts: Permission denied
+		fs-own --permissions=644 --admin -- /etc/hosts
+
+		# log
+		__print_style --success='Applied' ' ' --url="$url" ' to ' --path="$hosts_file"
+	}
+
+	# apply
+	apply_hosts_file "$CHOICE"
+
+	# =====================================
+	# Reconfigure
+
+	# update configuration
+	dorothy-config 'hosts.bash' --prefer=local -- \
+		--field='CHOICE' --value="$CHOICE"
+
+	# =====================================
+	# Finish
+
+	__print_style --g1='Setup Hosts file'
+
+	# finally, flush dns
+	flush-dns
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_hosts "$@"
+fi

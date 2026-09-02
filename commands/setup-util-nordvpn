@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+# https://support.nordvpn.com/Connectivity/Linux/1325531132/Installing-and-using-NordVPN-on-Debian-Ubuntu-Raspberry-Pi-Elementary-OS-and-Linux-Mint.htm
+
+function setup_util_nordvpn() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Preparation
+
+	local service_title='NordVPN'
+	local service_ids=(
+		'nordvpnd'
+		'nordvpnd.socket'
+	)
+
+	# =====================================
+	# Setup Utility
+
+	local options=(
+		--name='NordVPN'
+		--cli='nordvpn'
+		"$@"
+		APT_KEY='https://repo.nordvpn.com/gpg/nordvpn_public.asc'
+		APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://repo.nordvpn.com/deb/nordvpn/debian stable main'
+		APT='nordvpn' # UBUNTU
+	)
+	setup-util "${options[@]}"
+
+	# if missing, complete uninstall and exit
+	if __command_missing -- 'nordvpn'; then
+		# remove service
+		service-helper --remove -- \
+			"${service_ids[@]}"
+
+		# all done for uninstall
+		return 0
+	fi
+
+	# remove netscript
+	# it prevents nordvpn from establishing its virtual network interfaces
+	# seems netscript confuses nordvpn as to which operating system / network stack nordvpn is running on
+	setup-util-netscript --uninstall
+
+	# if installed, configure service if supported
+	if service-helper --supported; then
+		# verify the service was initialised
+		if ! service-helper --exists -- "${service_ids[@]}"; then
+			__print_error "$service_title was installed, however the service was not."
+			return 1
+		fi
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_nordvpn "$@"
+fi

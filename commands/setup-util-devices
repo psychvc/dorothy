@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+
+function setup_util_devices() (
+	source "$DOROTHY/sources/bash.bash"
+	local options
+
+	# This is commented out as it was never actually useful
+	# https://ostechnix.com/how-to-find-hard-disk-drive-details-in-linux/
+	# setup-util --name='S.M.A.R.T. Monitoring Tools' --cli=smartctl "$@" \
+	# 	APK='smartmontools' \
+	# 	APT='smartmontools' \
+	# 	BREW='smartmontools' \
+	# 	ZYPPER='smartmontools' # SUSE
+
+	if is-linux; then
+		# https://repology.org/project/sg3-utils/versions
+		# https://packages.debian.org/sid/amd64/sg3-utils/filelist
+		# /usr/bin/rescan-scsi-bus.sh
+		# /usr/bin/scsi_logging_level
+		# /usr/bin/scsi_mandat
+		# /usr/bin/scsi_readcap
+		# /usr/bin/scsi_ready
+		# /usr/bin/scsi_satl
+		# /usr/bin/scsi_start
+		# /usr/bin/scsi_stop
+		# /usr/bin/scsi_temperature
+		# /usr/bin/sg_bg_ctl
+		# /usr/bin/sg_compare_and_write
+		# /usr/bin/sg_copy_results
+		# /usr/bin/sg_dd
+		# /usr/bin/sg_decode_sense
+		# /usr/bin/sg_emc_trespass
+		# /usr/bin/sg_format
+		# /usr/bin/sg_get_config
+		# /usr/bin/sg_get_elem_status
+		# /usr/bin/sg_get_lba_status
+		# /usr/bin/sg_ident
+		# /usr/bin/sg_inq
+		# /usr/bin/sg_logs
+		# /usr/bin/sg_luns
+		# /usr/bin/sg_map
+		# /usr/bin/sg_map26
+		# /usr/bin/sg_modes
+		# /usr/bin/sg_opcodes
+		# /usr/bin/sg_persist
+		# /usr/bin/sg_prevent
+		# /usr/bin/sg_raw
+		# /usr/bin/sg_rbuf
+		# /usr/bin/sg_rdac
+		# /usr/bin/sg_read
+		# /usr/bin/sg_read_attr
+		# /usr/bin/sg_read_block_limits
+		# /usr/bin/sg_read_buffer
+		# /usr/bin/sg_read_long
+		# /usr/bin/sg_readcap
+		# /usr/bin/sg_reassign
+		# /usr/bin/sg_referrals
+		# /usr/bin/sg_rep_pip
+		# /usr/bin/sg_rep_zones
+		# /usr/bin/sg_requests
+		# /usr/bin/sg_reset
+		# /usr/bin/sg_reset_wp
+		# /usr/bin/sg_rmsn
+		# /usr/bin/sg_rtpg
+		# /usr/bin/sg_safte
+		# /usr/bin/sg_sanitize
+		# /usr/bin/sg_sat_identify
+		# /usr/bin/sg_sat_phy_event
+		# /usr/bin/sg_sat_read_gplog
+		# /usr/bin/sg_sat_set_features
+		# /usr/bin/sg_scan
+		# /usr/bin/sg_seek
+		# /usr/bin/sg_senddiag
+		# /usr/bin/sg_ses
+		# /usr/bin/sg_ses_microcode
+		# /usr/bin/sg_start
+		# /usr/bin/sg_stpg
+		# /usr/bin/sg_stream_ctl
+		# /usr/bin/sg_sync
+		# /usr/bin/sg_test_rwbuf
+		# /usr/bin/sg_timestamp
+		# /usr/bin/sg_turs
+		# /usr/bin/sg_unmap
+		# /usr/bin/sg_verify
+		# /usr/bin/sg_vpd
+		# /usr/bin/sg_wr_mode
+		# /usr/bin/sg_write_buffer
+		# /usr/bin/sg_write_long
+		# /usr/bin/sg_write_same
+		# /usr/bin/sg_write_verify
+		# /usr/bin/sg_write_x
+		# /usr/bin/sg_xcopy
+		# /usr/bin/sg_zone
+		# /usr/bin/sginfo
+		# /usr/bin/sgm_dd
+		# /usr/bin/sgp_dd
+		options=(
+			--optional
+			--cli='sginfo'
+			"$@"
+			APK='sg3_utils'    # ALPINE
+			AUR='sg3_utils'    # ARCH
+			RPM='sg3_utils'    # FEDORA
+			ZYPPER='sg3_utils' # SUSE
+			APT='sg3-utils'    # UBUNTU
+		)
+		setup-util "${options[@]}"
+
+		# https://linux.die.net/man/8/sdparm
+		# The sdparm utility accesses SCSI device parameters. When the SCSI device is a disk, sdparm's role is similar to its namesake: the Linux hdparm utility which is primarily designed for ATA disks that had device names starting with "hd".
+		# not found on repology
+		# https://packages.debian.org/sid/amd64/sdparm/filelist
+		# /usr/bin/sas_disk_blink
+		# /usr/bin/scsi_ch_swp
+		# /usr/bin/sdparm
+		options=(
+			--optional
+			--cli=sdparm
+			"$@"
+			APT='sdparm' # UBUNTU
+		)
+		setup-util "${options[@]}"
+
+		# https://repology.org/project/hdparm/versions
+		# https://packages.debian.org/sid/amd64/hdparm/filelist
+		# /sbin/hdparm
+		options=(
+			--optional
+			--cli=hdparm
+			"$@"
+			APK='hdparm'    # ALPINE
+			AUR='hdparm'    # ARCH
+			RPM='hdparm'    # FEDORA
+			ZYPPER='hdparm' # SUSE
+			APT='hdparm'    # UBUNTU
+		)
+		setup-util "${options[@]}"
+
+		# https://repology.org/project/lshw/versions
+		# https://packages.debian.org/sid/amd64/lshw/filelist
+		# /usr/bin/lshw
+		options=(
+			--optional
+			--cli=lshw
+			"$@"
+			APK='lshw'    # ALPINE
+			AUR='lshw'    # ARCH
+			RPM='lshw'    # FEDORA
+			ZYPPER='lshw' # SUSE
+			APT='lshw'    # UBUNTU
+		)
+		setup-util "${options[@]}"
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_devices "$@"
+fi

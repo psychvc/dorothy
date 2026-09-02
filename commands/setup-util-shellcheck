@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# trunk-ignore-all(shellcheck/SC1073)
+# trunk-ignore-all(shellcheck/SC1072)
+
+# https://github.com/koalaman/shellcheck#installing
+
+# https://github.com/koalaman/shellcheck/releases
+# shellcheck-v0.9.0.darwin.x86_64.tar.xz
+# shellcheck-v0.9.0.linux.aarch64.tar.xz
+# shellcheck-v0.9.0.linux.armv6hf.tar.xz
+# shellcheck-v0.9.0.linux.x86_64.tar.xz
+# shellcheck-v0.9.0.zip
+
+# https://packages.debian.org/sid/amd64/shellcheck/filelist
+# /usr/bin/shellcheck
+
+function setup_util_shellcheck() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=shellcheck "$@"; then
+		return 0
+	fi
+
+	# prefer apt last, as it installs an outdated version
+	# no apk
+	local arch options=(
+		--cli='shellcheck'
+		--order='... apt'
+		"$@"
+		APT='shellcheck' # UBUNTU
+		AUR='shellcheck' # ARCH
+		BREW='shellcheck'
+		BSD='shellcheck'
+		CABAL='ShellCheck'
+		CHOCO='shellcheck'
+		CONDA_CHANNEL='conda-forge'
+		CONDA='shellcheck'
+		EMERGE='shellcheck' # GENTOO
+		EOPKG='shellcheck'  # SOLUS
+		NIX='nixpkgs.shellcheck'
+		PORT='shellcheck'
+		RPM='ShellCheck' # FEDORA
+		SCOOP='shellcheck'
+		SNAP_CHANNEL='edge'
+		SNAP='shellcheck'
+		ZYPPER='ShellCheck' # SUSE
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='koalaman/shellcheck' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB='*/shellcheck'
+		)
+	}
+	if is-mac; then
+		__add_download_option '.darwin.x86_64.tar.xz' || :
+	else
+		arch="$(get-arch)"
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '.linux.aarch64.tar.xz' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option '.linux.armv6hf.tar.xz' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '.linux.x86_64.tar.xz' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_shellcheck "$@"
+fi

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+# vino does not appear in the gnome sharing settings
+# gnome-remote-desktop does however
+
+# https://packages.debian.org/sid/amd64/gnome-remote-desktop/filelist
+# /usr/bin/grdctl
+
+# https://manpages.ubuntu.com/manpages/kinetic/man1/grdctl.1.html
+# grdctl - Command line tool for configuring GNOME Remote Desktop
+
+function setup_util_vnc() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# checks
+	if ! is-gnome; then
+		__print_style --stderr --notice="[$0] is for Linux systems with [gnome] installed, skipping." || return $?
+		return 0
+	fi
+
+	# setup
+	local options=(
+		--name='GNOME Remote Desktop'
+		--cli='grdctl'
+		"$@"
+		AUR='gnome-remote-desktop' # ARCH
+		APT='gnome-remote-desktop' # UBUNTU
+	)
+	setup-util "${options[@]}" || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_vnc "$@"
+fi

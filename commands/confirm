@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+
+# NOTES:
+# [echo -en] doesn't work with escape codes on bash v3, [printf ...] does
+# [tty] is used as otherwise "$(confirm ...)" will not output anything to the user, as stdout gets captured in those situations
+#    why would anyone use confirm in that way? they don't but confirm within a getter does, such as [select_installer] within [macos-drive]
+
+function confirm_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local -i delay=1
+	local escape=$'\e'
+
+	{
+		sleep "$delay"
+		__print_line
+	} | eval-tester --name='receive positive response by enter key' --ignore-tty -- \
+		confirm --ppid=$$ --positive --timeout=$((delay * 2)) -- 'What is your response?'
+
+	{
+		sleep "$delay"
+		__print_line
+	} | eval-tester --name='receive negative response by enter key' --status=1 --ignore-tty -- \
+		confirm --ppid=$$ --negative --timeout=$((delay * 2)) -- 'What is your response?'
+
+	{
+		sleep "$delay"
+		__print_lines 'y'
+	} | eval-tester --name='receive positive response by y key' --ignore-tty -- \
+		confirm --ppid=-1 --bool --timeout=$((delay * 2)) -- 'What is your response?'
+
+	{
+		sleep "$delay"
+		__print_lines 'n'
+	} | eval-tester --name='receive negative response by n key' --status=1 --ignore-tty -- \
+		confirm --ppid=-1 --bool --timeout=$((delay * 2)) -- 'What is your response?'
+
+	{
+		sleep "$delay"
+		__print_line
+	} | eval-tester --name='receive timeout response by timeout and enter key rejected by require' --status=60 --ignore-tty --stderr='What is your response?  [ABORT] [ input failure: timed out: required ]' -- \
+		confirm --no-color --ppid=-1 --bool --timeout=$((delay * 2)) -- 'What is your response?'
+
+	eval-tester --name='receive positive response by timeout and no input' --ignore-tty -- \
+		confirm --no-color --ppid=$$ --positive --timeout="$delay" -- 'What is your response?'
+
+	eval-tester --name='receive negative response by timeout and no input' --status=1 --ignore-tty -- \
+		confirm --no-color --ppid=$$ --negative --timeout="$delay" -- 'What is your response?'
+
+	eval-tester --name='receive timeout response by timeout and no input' --status=60 --ignore-tty --stderr='What is your response?  [ABORT] [ input failure: timed out: required ]' -- \
+		confirm --no-color --ppid=-1 --bool --timeout="$delay" -- 'What is your response?'
+
+	{
+		# press escape key
+		sleep "$delay"
+		__print_string "$escape"
+	} | eval-tester --name='receive abort response by escape key' --status=125 --ignore-tty --stderr='What is your response?  [ABORT]' -- \
+		confirm --no-color --ppid=-1 --bool --timeout=$((delay * 2)) -- 'What is your response?'
+
+	return 0
+)
+function confirm_() (
+	source "$DOROTHY/sources/bash.bash"
+	source "$DOROTHY/sources/styles.bash" # __load_styles
+	source "$DOROTHY/sources/ansi.bash"   # __read_key
+	source "$(type -P echo-clear-lines)"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			USAGE:
+			confirm --ppid=\$\$ [...options]
+
+			OPTIONS:
+			<question> | --question=<question>
+			    Display this question in the prompt. If specified multiple times, they will be joined by newline, and only the first will be lingered.
+
+			--bool | --positive | --negative | --confirm
+			--mode=<bool|positive|negative|confirm>
+			    [bool] mode forces a positive or negative confirmation, with no default.
+			    [positive] mode defaults to a positive confirmation.
+			    [negative] mode defaults to a negative confirmation.
+			    [confirm] mode forces a confirmation, with no default; it is the default mode.
+
+			--yes=<OK>
+			    What to display to the user for positive confirmations, defaults to "OK".
+
+			--no=<CANCEL>
+			    What to display to the user for negative confirmations, defaults to "CANCEL".
+
+			--abort=<ABORT>
+			    What to display to the user for aborted confirmations, defaults to "ABORT".
+
+			--ppid=<ppid>
+			    The parent process ID to also terminate upon abortion.
+			    In bourne shells this is specified like so [--ppid=\$\$]
+			    This is necessary because the typical usage of [if confirm ...; then ...; else ...; fi]
+			    will only catch positive and negative confirmations, but not abortion cases, as such abortions would otherwise be registered as negative cases.
+			    Providing the parent process ID allows the abortion to propagate to the parent, allowing the intended abortion behaviour to propagate.
+
+			--timeout=<timeout>
+			    Timeout in seconds.
+			    Under <negative> mode, defaults to 60 seconds (one minute) before defaulting to a negative confirmation.
+			    Under <positive> mode, defaults to 60 seconds (one minute) before defaulting to a positive confirmation.
+			    Under other modes, defaults to 3600 seconds (one hour) before abortion occurs.
+
+			--[no-]linger=[yes|NO]
+			    Whether the prompt should persist afterwards.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# prepare
+	local item option_question=() option_mode='confirm' option_timeout='3600' option_ppid='' option_linger='no'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--no-color'* | '--color'*) __flag --source={item} --target={COLOR} --affirmative --export ;;
+		'--question='*) option_question+=("${item#*=}") ;;
+		'--bool') option_mode='bool' ;;
+		'--positive' | '--positive=yes' | '--negative=no' | '--no-negative') option_mode='positive' ;;
+		'--negative' | '--negative=yes' | '--positive=no' | '--no-positive') option_mode='negative' ;;
+		'--confirm') option_mode='confirm' ;;
+		'--mode='*) option_mode="${item#*=}" ;;
+		'--timeout='*) option_timeout="${item#*=}" ;;
+		'--ppid='*) option_ppid="${item#*=}" ;;
+		'--no-linger'* | '--linger'*) __flag --source={item} --target={option_linger} --affirmative ;;
+		'--')
+			option_question+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_question+=("$item") ;;
+		esac
+	done
+
+	# mode
+	if [[ $option_mode =~ ^(positive|negative)$ ]]; then
+		if [[ -z $option_timeout ]]; then
+			option_timeout='60' # one minute
+		fi
+	fi
+
+	# checks
+	if [[ -z $option_ppid ]]; then
+		help '<ppid> is necessary'
+	fi
+
+	# question
+	local question_title question_body
+	if [[ ${#option_question[@]} -ne 0 ]]; then
+		if [[ -n ${option_question[0]} ]]; then
+			question_title="${option_question[0]}"
+			question_body="$(__print_lines "${option_question[@]:1}")"
+		else
+			question_title="$(__print_lines "${option_question[@]:1}")"
+			question_body=''
+		fi
+	else
+		question_title=''
+		question_body=''
+	fi
+
+	# =====================================
+	# Styles
+
+	__load_styles --save -- bell commentary_timeout_default commentary_timeout_required commentary_input_failure result_commentary_spacer question_body question_title_prompt question_title_result || return $?
+
+	# style the question
+	local question_title_and_body='' question_title_result=''
+	if [[ -n $question_title ]]; then
+		if [[ -n $question_body ]]; then
+			question_title_and_body="${STYLE__question_title_prompt}${question_title}${STYLE__END__question_title_prompt}"$'\n'"${STYLE__question_body}${question_body}${STYLE__END__question_body}"$'\n'
+		else
+			question_title_and_body="${STYLE__question_title_prompt}${question_title}${STYLE__END__question_title_prompt}"$'\n'
+		fi
+		question_title_result="${STYLE__question_title_result}${question_title}${STYLE__END__question_title_result}  "
+	fi
+
+	# renders
+	# 🯟
+	local options_unselected=() options_selected=() options_results=() selected_index='' selectable_count selectable_last yes_index no_index='' abort_index
+	if [[ $option_mode =~ ^(positive|negative|bool)$ ]]; then
+		options_selected+=(
+			"$(__print_style --monocolor='  *YES* [Y]' --multicolor --background-green+intense-white+bold='👉 YES ' --background-white --green='🭬' --intense-black=' Y  ')"
+			"$(__print_style --monocolor='     *NO* [N]' --multicolor '   ' --background-red+intense-white+bold='👉 NO ' --background-white --red='🭬' --intense-black=' N  ')"
+		)
+		options_unselected+=(
+			"$(__print_style --monocolor='   YES  [Y]' --multicolor '   ' --green='YES' --dim=' ' --invert+white='🭬' --background-white+intense-black=' Y  ')"
+			"$(__print_style --monocolor='      NO  [N]' --multicolor '      ' --red='NO' --dim=' ' --invert+white='🭬' --background-white+intense-black=' N  ')"
+		)
+		options_results=(
+			"$(__print_style --monocolor='[YES]' --multicolor+background-green+intense-white+bold=' YES ')"
+			"$(__print_style --monocolor='[NO]' --multicolor+background-red+intense-white+bold=' NO ')"
+		)
+		if [[ $option_mode == 'positive' ]]; then
+			selected_index=0
+		elif [[ $option_mode == 'negative' ]]; then
+			selected_index=1
+		fi # if bool, don't set index
+		yes_index=0
+		no_index=1
+		abort_index=2
+	elif [[ $option_mode == 'confirm' ]]; then
+		options_selected+=(
+			"$(__print_style --monocolor='  *PROCEED* [ENTER|SPACE|Y]' --multicolor --background-green+intense-white+bold='👉 PROCEED ' --background-white --green='🭬' --intense-black=' ENTER │ SPACE │ Y  ')"
+		)
+		options_unselected+=(
+			'' # never used
+		)
+		options_results=(
+			"$(__print_style --monocolor='[PROCEED]' --multicolor+background-green+intense-white+bold=' PROCEED ')"
+		)
+		selected_index=0
+		yes_index=1
+		abort_index=1
+	fi
+	options_unselected+=(
+		"            $(__print_style --monocolor=' ABORT  [ESC|Q]' --multicolor --dim+red='ABORT' --dim=' ' --invert+white='🭬' --dim+background-white+intense-black=' ESC │ Q  ')"
+	)
+	options_results+=(
+		"$(__print_style --monocolor='[ABORT]' --multicolor+background-red+intense-white+bold=' ABORT ')"
+	)
+	selectable_count="${#options_selected[@]}"
+	selectable_last="$((selectable_count - 1))"
+
+	# =====================================
+	# Action
+
+	local question_confirm_and_input_lines='' FINISHED=''
+	if [[ -n $question_title_and_body ]]; then
+		__value_to_tty "$question_title_and_body"
+	fi
+	function refresh {
+		# clear the prompt and any input lines
+		echo_clear_lines --target=TTY -- "$question_confirm_and_input_lines"
+
+		# re-render the keys prompt
+		local str='' index
+		for index in "${!options_unselected[@]}"; do
+			if [[ -n $selected_index && $index -eq $selected_index ]]; then
+				str+="${options_selected[index]}"
+			else
+				str+="${options_unselected[index]}"
+			fi
+		done
+		__value_to_tty "$str  "
+	}
+	function on_confirm_terminate {
+		RESULT=$?
+		if [[ -z $RESULT || $RESULT -eq 0 ]]; then
+			RESULT=100 # EPROTO 100 Protocol error
+		fi
+		on_finish
+	}
+	function on_finish {
+		trap - SIGINT SIGTERM
+
+		# this can run twice if ctrl+c
+		if [[ $FINISHED == 'yes' ]]; then
+			return "$RESULT"
+		fi
+		FINISHED='yes'
+
+		# clear
+		echo_clear_lines --target=TTY --here-string <<<"$question_title_and_body$question_confirm_and_input_lines"
+
+		# output the finale
+		local result
+		if [[ $RESULT -le $selectable_last ]]; then
+			# success response
+			# inform if requested
+			if [[ $option_linger == 'yes' ]]; then
+				result="${options_results[RESULT]}"
+				__value_to_tty "$question_title_result$result$commentary"$'\n'
+			fi
+		else
+			# failure response
+			# always inform
+			result="${options_results[abort_index]}"
+			if [[ $option_linger == 'yes' ]]; then
+				__value_to_tty "$question_title_result$result$commentary"$'\n'
+			else
+				# even if not lingering, ensure crash response is shown
+				__print_lines "$question_title_result$result$commentary" >&2
+			fi
+			# kill caller's parent
+			if [[ $option_ppid -ge 0 ]]; then
+				if [[ $option_ppid -ge 1 ]]; then
+					# kill "-$option_ppid" ...
+					# ^ fails because 130 isn't supported
+					# kill -n ... ...
+					# kill "-$(kill -l "$option_ppid")" ...
+					# ^ works but isn't serious enough to cause the termination
+					# "$(ps -p $$ -o ppid=)"
+					# ^ doesn't work, as is different pid than manual
+					kill "$option_ppid"
+				fi
+				# kill our parent
+				kill "$$"
+				# kill our subshell
+				kill 0
+				# kill our shell
+				exit "$RESULT"
+			fi
+		fi
+		# kill this
+		return "$RESULT"
+	}
+	trap on_confirm_terminate SIGINT SIGTERM # this is necessary to always show ABORT message
+
+	local input keys commentary='' RESULT=''
+	local -i __read_status
+	while :; do
+		# render
+		refresh
+
+		# capture
+		__read_status=0
+		# trunk-ignore(shellcheck/SC2034)
+		input="$(__read_key --keep-line-buffer-newlines --timeout="$option_timeout")" || __read_status=$?
+
+		# input => keys => key
+		keys=()
+		__split --source={input} --target={keys}
+
+		# prep clearing of any input that leaked
+		question_confirm_and_input_lines=''
+		# only applies in line-buffer mode
+		if [[ $IS_STDIN_LINE_BUFFERED == 'yes' ]]; then
+			for key in "${keys[@]}"; do
+				if [[ $key =~ ^(enter|line-buffer)$ ]]; then
+					question_confirm_and_input_lines+=$'\n'
+				fi
+			done
+		fi
+
+		# handle status
+		if [[ $__read_status -eq 60 ]]; then
+			# timeout
+			# default
+			commentary="${STYLE__result_commentary_spacer}${STYLE__commentary_timeout_default}"
+			if [[ $option_mode == 'positive' ]]; then
+				RESULT=0
+				break
+			elif [[ $option_mode == 'negative' ]]; then
+				RESULT=1
+				break
+			else
+				# bool, confirm
+				# required
+				commentary="${STYLE__result_commentary_spacer}${STYLE__commentary_timeout_required}"
+				RESULT="$__read_status"
+				break
+			fi
+		elif [[ $__read_status -eq 94 ]]; then
+			# unknown character, send bell and continue
+			__value_to_tty "$STYLE__bell"
+			continue
+		elif [[ $__read_status -ne 0 ]]; then
+			# failure
+			commentary="${STYLE__result_commentary_spacer}$(printf "$STYLE__commentary_input_failure" "read status: $__read_status")"
+			RESULT="$__read_status"
+			break
+		fi
+
+		# process the keys
+		for key in "${keys[@]}"; do
+			case "$key" in
+			'Y' | 'y')
+				if [[ -n ${yes_index-} ]]; then
+					RESULT="$yes_index"
+					break
+				else
+					__value_to_tty "$STYLE__bell"
+				fi
+				;;
+			'N' | 'n')
+				if [[ -n ${no_index-} ]]; then
+					RESULT="$no_index"
+					break
+				else
+					__value_to_tty "$STYLE__bell"
+				fi
+				;;
+			'left' | 'right' | 'up' | 'down')
+				# Yes the differences in combination is intentional... try it!
+				if [[ -z $selected_index || $selectable_count -eq 1 ]]; then
+					if [[ $key =~ ^(right|up)$ ]]; then
+						selected_index="$selectable_last"
+					elif [[ $key =~ ^(left|down)$ ]]; then
+						selected_index=0
+					fi
+				elif [[ $key =~ ^(left|up)$ ]]; then
+					if [[ $selected_index -eq 0 ]]; then
+						selected_index="$selectable_last"
+					else
+						selected_index="$((selected_index - 1))"
+					fi
+				elif [[ $key =~ ^(right|down)$ ]]; then
+					if [[ $selected_index -eq $selectable_last ]]; then
+						selected_index=0
+					else
+						selected_index="$((selected_index + 1))"
+					fi
+				fi
+				;;
+			'enter' | 'space')
+				if [[ -n $selected_index ]]; then
+					if [[ $selected_index -eq 0 ]]; then
+						RESULT=0
+						break
+					elif [[ $selected_index -eq 1 ]]; then
+						# not possible in bool mode, as selected_index will never be 1, so nothing needed here
+						RESULT=1
+						break
+					else
+						RESULT=125 # abort
+						break
+					fi
+				fi
+				__value_to_tty "$STYLE__bell"
+				;;
+			'escape' | 'Q' | 'q')
+				RESULT=125 # abort
+				break
+				;;
+			esac
+		done
+
+		# check
+		if [[ -n $RESULT ]]; then
+			break
+		fi
+	done
+	on_finish
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		confirm_test
+	else
+		confirm_ "$@"
+	fi
+fi

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+function is_linux_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local os
+	os="$(uname -s)"
+	if [[ $os == 'Linux' ]]; then
+		eval-tester --name='is linux' --status='0' -- \
+			is-linux
+	else
+		eval-tester --name='is not linux' --status='1' -- \
+			is-linux
+	fi
+
+	return 0
+)
+function is_linux() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Checks if the system is Linux
+
+			USAGE:
+			is-linux
+
+			RETURNS:
+			[0] if the system is Linux
+			[1] if the system is not Linux
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	# =====================================
+	# Action
+
+	# this will/should pass on WSL on Windows
+	if [[ "$(uname -s)" == 'Linux' ]]; then
+		return 0
+	else
+		return 1
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		is_linux_test
+	else
+		is_linux "$@"
+	fi
+fi

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+function echo_escape_regexp() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			For each <input>, escape regex control characters by prepending backslashes.
+
+			USAGE:
+			echo-escape-regexp [...options] [--] ...<input>
+			echo-lines ...<input> | echo-escape-regexp [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLE:
+
+			echo-escape-regexp -- '[a-z](?:test)/a/.*.+?'
+
+			    \[a-z\]\(\?:test\)/a/\.\*\.\+\?
+			    # exit status: 0
+
+			echo-lines -- '[a-z](?:test)/a/.*.+?' | echo-escape-regexp --stdin
+
+			    \[a-z\]\(\?:test\)/a/\.\*\.\+\?
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	# this was provided by chatgpt, with printf modifications
+	function __on_whole {
+		local input="$1" i char output=''
+		for ((i = 0; i < ${#input}; i++)); do
+			char="${input:i:1}"
+			case "$char" in
+			# trunk-ignore(shellcheck/SC1001)
+			\\ | \[ | \] | \{ | \} | \^ | \$ | \. | \* | \+ | \? | \| | \( | \))
+				output+="\\$char" || return $?
+				;;
+			*)
+				output+="$char" || return $?
+				;;
+			esac
+		done
+		__print_piece "$output" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_escape_regexp "$@"
+fi

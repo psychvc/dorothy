@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+function echo_lowercase() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Output each input as lowercase.
+
+			USAGE:
+			echo-lowercase [...options] [--] ...<input>
+			echo-lines ...<input> | echo-lowercase [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLES:
+
+			echo-lowercase -- HELLO WORLD
+
+			    hello
+			    world
+			    # exit status: 0
+
+			echo-lines -- HELLO WORLD | echo-lowercase
+
+			    hello
+			    world
+			    # exit status: 0
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# =====================================
+	# Action
+
+	function __on_whole {
+		local string="$1"
+		__get_lowercase_string -- "$string" || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_lowercase "$@"
+fi

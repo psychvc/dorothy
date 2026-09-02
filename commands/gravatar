@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+function gravatar() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the URL of the email's gravatar.
+
+			USAGE:
+			gravatar [...options] [<email>]
+
+			OPTIONS:
+			--open
+			    Open the gravatar in your web browser.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_email='' option_open='no'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--no-open'* | '--open'*) __flag --source={item} --target={option_open} --affirmative ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $option_email ]]; then
+				option_email="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# ensure
+	option_email="$(
+		ask --required \
+			--question="Enter the email to get the Gravatar for" \
+			--default="$option_email"
+	)"
+
+	# =====================================
+	# Act
+
+	local md5_hash url
+	md5_hash="$(checksum --no-color --no-confirm --result=checksum --algorithm=md5 --string="$option_email")"
+	url="https://www.gravatar.com/avatar/${md5_hash}?s=2048"
+	__print_lines "$url"
+	if [[ $option_open == 'yes' ]]; then
+		open "$url"
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	gravatar "$@"
+fi

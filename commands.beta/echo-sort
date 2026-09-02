@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+function echo_sort() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Sort the inputs using [sort]
+
+			USAGE:
+			echo-sort [...options] [--] ...<input>
+			echo-lines ...<input> | echo-sort [...options]
+
+			OPTIONS:
+			$(__stdinargs__help_options --)
+
+			EXAMPLES:
+			echo-sort -- 3 2 1
+
+				1
+				2
+				3
+
+			echo-lines -- 3 2 1 | echo-sort --stdin
+
+				1
+				2
+				3
+
+			ALTERNATIVES:
+			# use [sort] directly for more advanced usage
+			echo-lines -- 3 2 1 | sort
+
+				1
+				2
+				3
+
+			# such as sorting version numbers
+			echo-lines -- 1.0 1.2 1.1 | sort -V
+
+				1.0
+				1.1
+				1.2
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# pool arguments
+	local inputs=()
+	function __on_piece {
+		inputs+=("$@")
+	}
+	# and sort once we have all of them
+	function __on_finish {
+		__print_lines "${inputs[@]}" | sort || return $?
+	}
+
+	stdinargs "$@"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	echo_sort "$@"
+fi

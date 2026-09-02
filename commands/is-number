@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+function is_number_test() (
+	source "$DOROTHY/sources/bash.bash"
+
+	eval-tester --name='zero IS a number' -- \
+		is-number -- 0
+
+	eval-tester --name='one IS a number' -- \
+		is-number -- 1
+
+	eval-tester --name='ten IS a number' -- \
+		is-number -- 10
+
+	eval-tester --name='decimal IS a number' -- \
+		is-number -- 0.1
+
+	eval-tester --name='triple decimal IS NOT a number' --status=1 -- \
+		is-number -- 1.1.1
+
+	eval-tester --name='negative IS a number' -- \
+		is-number -- -1
+
+	eval-tester --name='negative 10 IS a number' -- \
+		is-number -- -10
+
+	eval-tester --name='negative decimal IS a number' -- \
+		is-number -- -1.1
+
+	eval-tester --name='negative triple decimal IS NOT a number' --status=1 -- \
+		is-number -- -1.1.1
+
+	eval-tester --name='dash IS NOT a number' --status=1 -- \
+		is-number -- '-'
+
+	eval-tester --name='empty IS NOT a number' --status=1 -- \
+		is-number -- ''
+
+	eval-tester --name='letter IS NOT a number' --status=1 -- \
+		is-number -- 'a'
+
+	eval-tester --name='combo IS NOT a number' --status=1 -- \
+		is-number -- '-0a'
+
+	return 0
+)
+function is_number() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	# help
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Checks if the <input> is a valid number.
+			Companion to [is-integer] and [is-digit].
+
+			USAGE:
+			is-number [...options] [--] <input>
+
+			OPTIONS:
+			<input>
+			    Verify this <input> is a valid number
+
+			RETURNS:
+			[0] if all <input>s are valid numbers
+			[1] if any <input>s are not valid numbers
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_inputs=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_inputs+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_inputs+=("$item") ;;
+		esac
+	done
+
+	# verify
+	if [[ ${#option_inputs[@]} -eq 0 ]]; then
+		help 'No <input>s provided.'
+	fi
+
+	# =====================================
+	# Action
+
+	__is_number "${option_inputs[@]}" || return $?
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	if [[ $* == '--test' ]]; then
+		is_number_test
+	else
+		is_number "$@"
+	fi
+fi

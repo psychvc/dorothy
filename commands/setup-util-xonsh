@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# https://xon.sh/contents.html#installation
+
+function setup_util_xonsh() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# xonsh
+	local options=(
+		--cli='xonsh'
+		"$@"
+		UV='xonsh --with prompt-toolkit' # PYTHON
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_xonsh "$@"
+fi

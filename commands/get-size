@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+
+function get_size() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Get the size information of all attached drives and mounts, or of specific paths.
+
+			USAGE:
+			get-size [...paths]
+
+			QUIRKS:
+			If no paths are provided, the size of all attached drives and their mounts are returned.
+
+			If the path is a BTRFS mount, it will show the BTRFS information for the mount.
+
+			If the path is a file or directory and dust is installed (can be installed via setup-util-dust), dust will be used to fetch size information, otherwise du will be used.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_paths=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_paths+=("$@")
+			shift "$#"
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) option_paths+=("$item") ;;
+		esac
+	done
+
+	# allow no paths, as that returns details for attached volumes
+
+	# =====================================
+	# Action
+
+	if [[ ${#option_paths[@]} -eq 0 ]]; then
+		if is-mac; then
+			# size of the drives
+			eval-helper --elevate --verbose --wrap -- \
+				diskutil list
+		else
+			# size of the drives
+			eval-helper --elevate --verbose --wrap -- \
+				fdisk -l
+
+			# size of the mounts
+			eval-helper --elevate --verbose --wrap -- \
+				lsblk -e7
+
+			# root filesystem
+			eval-helper --verbose --wrap -- \
+				df -h
+		fi
+	else
+		local path
+		for path in "${option_paths[@]}"; do
+			path="$(fs-path --absolute -- "$path")"
+			if is-btrfs -- "$path"; then
+				# Show the structure of a filesystem
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs filesystem show
+
+				# Show detailed information about internal allocations in devices.
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs device usage "$path"
+
+				# Show detailed information about internal filesystem usage .
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs filesystem usage "$path"
+
+				# Show space usage information for a mount point
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs filesystem df "$path"
+
+				# Show space usage via system
+				# -a, --all             include pseudo, duplicate, inaccessible file systems
+				# -h, --human-readable  print sizes in powers of 1024 (e.g., 1023M)
+				eval-helper --elevate --verbose --wrap -- \
+					df -ah -- "$path"
+
+				# Show status
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs device stats "$path"
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs scrub status "$path" || : # if still running, exit code 1
+				eval-helper --elevate --verbose --wrap -- \
+					btrfs balance status "$path" || : # if still running, exit code 1
+
+			elif [[ $path == '/' ]]; then
+				# root filesystem
+				eval-helper --verbose --wrap -- \
+					df -h /
+
+			elif __command_exists -- dust; then
+				eval-helper --verbose --wrap -- \
+					dust -d 1 -- "$path"
+				#     -s, --apparent-size       Use file length instead of blocks
+				#     -d, --depth <depth>                             Depth to show
+
+			elif [[ -f $path ]]; then
+				# path is a file
+				#   -h, --human-readable  print sizes in human readable format (e.g., 1K 234M 2G)
+				eval-helper --verbose --wrap -- \
+					du -h -- "$path"
+
+			else
+				# path is a directory
+				local opts=()
+				if is-mac; then
+					opts+=(
+						'-hd'
+						1
+					)
+					# -A         Display the apparent size instead of the disk usage.  This can be helpful when operating on compressed volumes or sparse files.
+					# -a         Display an entry for each file in a file hierarchy.
+					# ^ incompatible with -d
+					# -s         Display an entry for each specified file.  (Equivalent to -d 0)
+					# ^ incompatible with -d
+					# -h         Human-readable output.
+					# -d depth   Display an entry for all files and directories depth directories deep.
+				else
+					opts+=(
+						'-aschd'
+						1
+					)
+					#   -a, --all             write counts for all files, not just directories
+					#   -s, --summarize       display only a total for each argument
+					#   -c, --total           produce a grand total
+					#   -h, --human-readable  print sizes in human readable format (e.g., 1K 234M 2G)
+					#   -d, --max-depth=N     print the total for a directory (or file, with --all)
+				fi
+				eval-helper --verbose --wrap -- \
+					du "${opts[@]}" -- "$path"
+			fi
+		done
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	get_size "$@"
+fi

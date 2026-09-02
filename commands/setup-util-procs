@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# https://github.com/dalance/procs
+# ps alternative
+
+# https://github.com/dalance/procs/releases
+# procs-0.14.0-1.x86_64.rpm
+# procs-v0.14.0-x86_64-linux.zip
+# procs-v0.14.0-x86_64-mac.zip
+# procs-v0.14.0-x86_64-windows.zip
+
+# https://repology.org/project/procs/versions
+
+function setup_util_procs() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=procs "$@"; then
+		return 0
+	fi
+
+	# no apt
+	local arch options=(
+		--cli='procs'
+		"$@"
+		APK='procs' # ALPINE
+		AUR='procs' # ARCH
+		BREW='procs'
+		CARGO='procs'
+		NIX='procs'
+		RPM='procs' # FEDORA
+		SCOOP='procs'
+		SNAP='procs'
+		ZYPPER='procs' # SUSE
+	)
+	function get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return $?
+		github-download --dry --slug='dalance/procs' --latest --asset-regexp="$regexp" | echo-first-line || return $?
+	}
+	function __add_download_option {
+		local url
+		url="$(get_github_asset_url "$1")" || return $?
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="$2"
+		)
+	}
+	function __add_rpm_option {
+		local url
+		url="$(get_github_asset_url "$1")" || return $?
+		options+=(
+			RPM="$url"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		__add_download_option '-x86_64-mac.zip' 'procs' || :
+	elif is-linux; then
+		if [[ $arch == 'x64' ]]; then
+			__add_rpm_option '.x86_64.rpm' || :
+			__add_download_option '-x86_64-linux.zip' 'procs' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option '-x86_64-windows.zip' 'procs.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_procs "$@"
+fi

@@ -1,0 +1,852 @@
+#!/usr/bin/env bash
+
+function setup_server() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Configuration
+
+	source "$DOROTHY/sources/config.sh"
+
+	# server.bash provides:
+	local SHARE_UTILS=(
+		# 'gocryptfs'
+		# 'nordvpn'
+		# 'plex'
+		# 'samba'
+		# 'syncthing'
+		# 'transmission'
+	)
+	local SHARE_USER='' SHARE_GROUP='' SHARE_PASSWORD=''
+	local DRIVE_MOUNT=() VAULT_MOUNT=() SAMBA_MOUNT=()
+	local PLEX_HOME='' SYNCTHING_HOME='' TRANSMISSION_HOME=''
+	local NORDVPN_TOKEN='' NORDVPN_DNS='' # 1.1.1.1 or 192.168.5.20 or whatever
+	__print_style --h2='server configuration' || return $?
+	load_dorothy_config 'server.bash'
+	__print_style --g2='server configuration' || return $?
+
+	# -------------------------------------
+	# Adjustments
+
+	local me owner=''
+	__prepare_current_user
+	if [[ $CURRENT_USER != 'root' ]]; then
+		me="$CURRENT_USER"
+	else
+		__prepare_login_user
+		me="$LOGIN_USER"
+	fi
+
+	local services_enable=(
+		'nordvpnd.socket'
+		'nordvpnd'
+	)
+	local services_disable=(
+		# 'smbd'
+		# "syncthing@$me"
+		# 'plexmediaserver'
+		'transmission-daemon'
+	)
+	local services_resume=(
+		'nordvpnd.socket'
+		'nordvpnd'
+		'smbd'
+		"syncthing@$me"
+		'plexmediaserver'
+		'transmission-daemon'
+	)
+	local services_configure=(
+		'smbd'
+		'plexmediaserver'
+		"syncthing@$me"
+		'transmission-daemon'
+	)
+	local services_vpn_dependent=(
+		'transmission-daemon'
+	)
+	local services_samba_dependent=(
+		'transmission-daemon'
+		'plexmediaserver'
+		"syncthing@$me"
+	)
+	local services_vault_dependent=(
+		'transmission-daemon'
+		'plexmediaserver'
+		"syncthing@$me"
+		'smbd'
+	)
+	local services_drive_dependent=(
+		'transmission-daemon'
+		'plexmediaserver'
+		"syncthing@$me"
+		'smbd'
+	)
+	local services_pause=(
+		'transmission-daemon'
+		'plexmediaserver'
+		"syncthing@$me"
+		'smbd'
+	)
+	local users=(
+		"$me"
+		'root'
+		'plex'
+		'docker'
+		'transmission'
+		'debian-transmission'
+		"$SHARE_USER"
+	)
+	local groups=(
+		'nordvpn'
+		'docker'
+		'plex'
+		'transmission'
+		'debian-transmission'
+		"$SHARE_GROUP"
+	)
+
+	# -------------------------------------
+	# Compatibility
+
+	if is-linux; then
+		# is linux, so no-op on assert_linux
+		function assert_linux {
+			:
+		}
+	else
+		# not linux, so fail on assert_linux
+		function assert_linux {
+			__print_error 'This action is for linux machines only.'
+			return 46 # EPFNOSUPPORT 46 Protocol family not supported
+		}
+	fi
+
+	# -------------------------------------
+	# Owner
+
+	function setup_owner {
+		# prepare
+		local item option_reload='no'
+		while [[ $# -ne 0 ]]; do
+			item="$1"
+			shift
+			case "$item" in
+			'--help' | '-h') help ;;
+			'--no-reload'* | '--reload'*) __flag --source={item} --target={option_reload} --affirmative ;;
+			'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+			*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+			esac
+		done
+
+		# check configuration
+		if [[ -z $SHARE_USER || -z $SHARE_GROUP ]]; then
+			__print_error 'SHARE_USER and SHARE_GROUP must be defined'
+			return 1
+		fi
+
+		# handle share user if desired
+		if [[ -n $SHARE_USER ]]; then
+			# create share user if necessary
+			if ! is-user -- "$SHARE_USER"; then
+				# create user
+				eval-helper --elevate -- useradd "$SHARE_USER" || :
+			fi
+
+			# ensure correct share user password
+			if [[ -n $SHARE_PASSWORD ]]; then
+				printf '%s:%s\n' "$SHARE_USER" "$SHARE_PASSWORD" | eval-helper --elevate -- chpasswd
+				if __command_exists -- smbpasswd; then
+					printf '%s\n%s\n' "$SHARE_PASSWORD" "$SHARE_PASSWORD" | eval-helper --elevate -- smbpasswd -sa "$SHARE_USER"
+				fi
+			fi
+
+			# ensure user is only a share user, rather than a login user
+			# must be after password setting, as password setting will undo this
+			eval-helper --elevate -- usermod -L "$SHARE_USER"
+		fi
+
+		# create share group if desired and necessary
+		if [[ -n $SHARE_GROUP ]] && ! is-group -- "$SHARE_GROUP"; then
+			eval-helper --elevate -- groupadd "$SHARE_GROUP" || :
+		fi
+
+		# add users to groups
+		local user group
+		for user in "${users[@]}"; do
+			# user doesn't exist (service user that we don't care about for this hostname)
+			if ! is-user -- "$user"; then
+				continue
+			fi
+			for group in "${groups[@]}"; do
+				# group doesn't exist (service group that we don't care about for this hostname)
+				if ! is-group -- "$group"; then
+					continue
+				fi
+				# skip if user already inside the group
+				if is-user-in-group --user="$user" --group="$group"; then
+					__print_style --dim --variable={user} ' is already inside ' --variable={group} || return $?
+					continue
+				fi
+				# add the user to the group
+				eval-helper --elevate -- gpasswd -a "$user" "$group"
+				# if it affected us, we have to reload
+				if [[ $user == "$me" ]]; then
+					option_reload='yes'
+				fi
+			done
+		done
+
+		# check if reload is necessary
+		if [[ $option_reload == 'yes' ]]; then
+			__print_style \
+				--success="The current user [$me] has been added to new groups." --newline \
+				--notice='You must logout or reboot for the change to apply.'
+		fi
+	}
+
+	# assert owner
+	local OWNER_MOUNT=()
+	if [[ -n $SHARE_USER && -n $SHARE_GROUP ]]; then
+		assert_linux
+		if is-user -- "$SHARE_USER" && is-group -- "$SHARE_GROUP" && is-user-in-group --user="$me" --group="$SHARE_GROUP"; then
+			owner="$(get-user-id --user="$SHARE_USER"):$(get-group-id --group="$SHARE_GROUP")"
+		else
+			setup_owner --reload='yes'
+		fi
+		OWNER_MOUNT+=(
+			--owner="$owner"
+			--user="$SHARE_USER"
+			--group="$SHARE_GROUP"
+		)
+	fi
+
+	# =================================
+	# ACTIONS
+
+	function act_permissions {
+		# prepare
+		local temp paths=() perms='a-xwrt,ug+Xrws'
+
+		# plex
+		# https://support.plex.tv/articles/201105343-advanced-hidden-server-settings/
+		# https://support.plex.tv/articles/202915258-where-is-the-plex-media-server-data-directory-located/
+		temp='/var/lib/plexmediaserver'
+		if [[ -n $PLEX_HOME ]] && is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			if is-missing --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$PLEX_HOME"; then
+				eval-helper --elevate -- mv -v -- "$temp" "$PLEX_HOME"
+			else
+				__print_style --warning="Both [$temp] and [$PLEX_HOME] exist" || return $?
+			fi
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			paths+=("$temp")
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$PLEX_HOME"; then
+			paths+=("$PLEX_HOME")
+		fi
+
+		# syncthing
+		# https://docs.syncthing.net/users/config.html
+		temp="$XDG_CONFIG_HOME/syncthing"
+		if [[ -n $SYNCTHING_HOME ]] && is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			if is-missing --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$SYNCTHING_HOME"; then
+				eval-helper --elevate -- mv -v -- "$temp" "$SYNCTHING_HOME"
+			else
+				__print_style --warning="Both [$temp] and [$SYNCTHING_HOME] exist" || return $?
+			fi
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			paths+=("$temp")
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$SYNCTHING_HOME"; then
+			paths+=("$SYNCTHING_HOME")
+		fi
+		temp="$HOME/Sync"
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			paths+=("$temp")
+		fi
+
+		# transmission
+		temp='/var/lib/transmission-daemon'
+		if [[ -n $TRANSMISSION_HOME ]] && is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			if is-missing --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$TRANSMISSION_HOME"; then
+				eval-helper --elevate -- mv -v -- "$temp" "$TRANSMISSION_HOME"
+			else
+				__print_style --warning="Both [$temp] and [$TRANSMISSION_HOME] exist" || return $?
+			fi
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+			paths+=("$temp")
+		fi
+		if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$TRANSMISSION_HOME"; then
+			paths+=("$TRANSMISSION_HOME")
+			# clear the log as it goes on forever
+			if is-present --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$TRANSMISSION_HOME/transmission.log"; then
+				eval-helper --elevate -- truncate -s0 "$TRANSMISSION_HOME/transmission.log"
+			fi
+		fi
+
+		# apply
+		if [[ ${#paths[@]} -ne 0 ]]; then
+			eval-helper --verbose --wrap -- \
+				fs-own --optional --permissions="$perms" --user="$SHARE_USER" --group="$SHARE_GROUP" --recursive -- "${paths[@]}"
+		else
+			__print_style --notice='No service configurations found yet.' || return $?
+		fi
+	}
+
+	function act_services {
+		service-helper --ignore --edit -- "${services_configure[@]}"
+	}
+
+	function act_configure {
+		# edit services
+		act_services
+
+		# samba
+		if service-helper --exists 'smbd'; then
+			edit --wait --elevate -- '/etc/samba/smb.conf'
+			testparm --suppress-prompt >/dev/null # test samba config
+		fi
+
+		# plex
+		if [[ -n $PLEX_HOME ]]; then
+			temp="$PLEX_HOME/Preferences.xml"
+			if is-file --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+				edit --wait --elevate -- "$temp"
+			fi
+		fi
+
+		# syncthing
+		if [[ -n $SYNCTHING_HOME ]]; then
+			temp="$SYNCTHING_HOME/config.xml"
+			if is-file --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+				edit --wait --elevate -- "$temp"
+			fi
+		fi
+
+		# transmission
+		if [[ -n $TRANSMISSION_HOME ]]; then
+			temp="$TRANSMISSION_HOME/settings.json"
+			if is-file --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp"; then
+				edit --wait --elevate -- "$temp"
+			fi
+		fi
+	}
+
+	function act_config {
+		local paths=(
+			/etc/systemd/journald.conf
+			/etc/log2ram.conf
+			/etc/logrotate.conf
+			/etc/fuse.conf
+			/etc/samba/smb.conf
+			/etc/systemd/system/**/override.conf
+			"$PLEX_HOME/Preferences.xml"
+			"$SYNCTHING_HOME/config.xml"
+			"$TRANSMISSION_HOME/settings.json"
+		)
+		echo-if-file -- "${paths[@]}" | echo-file --plain --stdin
+	}
+
+	# ---------------------------------
+	# Setup
+
+	function act_setup {
+		# fix timezone
+		eval-helper --elevate -- dpkg-reconfigure tzdata # essential, otherwise time won't sync
+		# not needed, as is handled during installation: eval-helper --elevate -- dpkg-reconfigure locales
+
+		# setup utilities
+		local utility
+		for utility in "${SHARE_UTILS[@]}"; do
+			setup-util-"$utility"
+		done
+
+		# ensure installed utilities are correctly disabled, configured, and enabled
+		service-helper --ignore --disable -- "${services_disable[@]}"
+		act_services
+		service-helper --ignore --enable -- "${services_enable[@]}"
+
+		# ensure newly created service users and groups are configured correctly
+		setup_owner
+
+		# gocryptfs
+		local temp
+		temp="$(type -P gocryptfs 2>/dev/null || :)"
+		if [[ -n $temp ]]; then
+			# ensure that it is accessible
+			if ! eval-helper --inherit --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$temp" --version; then
+				setup-util-gocryptfs --upgrade
+			fi
+
+			# attach the group to the executable
+			fs-own --optional --permissions='g+rx' --group="$SHARE_GROUP" --recursive -- "$temp"
+		fi
+	}
+
+	# ---------------------------------
+	# VPN
+
+	function verify_nordvpn_killswitch {
+		# note: I'm not sure why [echo-write] is needed here, need to test on my raspberry pi server machine, and document why or remove it
+
+		# verify firewall, this is crucial for killswitch to work
+		nordvpn set firewall on || : # or to prevent already enabled errors
+		waiter 5                     # this can take a while for changes to be reflected
+		if ! nordvpn settings | echo-write --buffer | grep --quiet --fixed-strings --regexp='Firewall: enabled'; then
+			__print_style --error='Firewall failed to enable. Reboot your machine.' || return $?
+			return 2
+		fi
+
+		# verify killswitch
+		nordvpn set killswitch on || : # or to prevent already enabled errors
+		waiter 5                       # this can take a while for changes to be reflected
+		if ! nordvpn settings | echo-write --buffer | grep --quiet --fixed-strings --regexp='Kill Switch: enabled'; then
+			__print_style --error='Killswitch failed to enable. Reboot your machine.' || return $?
+			return 2
+		fi
+	}
+	function verify_nordvpn_connection {
+		# verify nordvpn killswitch
+		verify_nordvpn_killswitch
+
+		# verify nordvpn connection
+		local vpn_address vpn_prefix clear_address clear_prefix
+		if nordvpn status | echo-regexp -q --regexp='Status: Connected'; then
+			vpn_address="$(nordvpn status | echo-regexp -o --regexp='(?:Server )?IP: (.+)' --replace='$1')"
+			vpn_prefix="$(__print_lines "$vpn_address" | echo-regexp -o --regexp='^[0-9]+[.][0-9]+[.][0-9]+[.]')"
+			clear_address="$(what-is-my-ip remote)"
+			clear_prefix="$(__print_lines "$clear_address" | echo-regexp -o --regexp='^[0-9]+[.][0-9]+[.][0-9]+[.]')"
+			if [[ $vpn_prefix == "$clear_prefix" ]]; then
+				__print_style --success="Successfully connected [$clear_address] to NordVPN [$vpn_address]." || return $?
+			else
+				__print_style --error="Not connected [$clear_address] to NordVPN [$vpn_address]." || return $?
+				return 1
+			fi
+		else
+			return 1
+		fi
+		# verify nordvpn killswitch
+		verify_nordvpn_killswitch
+	}
+	function act_disconnect {
+		# shutdown and disable nord
+		if __command_exists -- nordvpn; then
+			# stop vpn dependent
+			service-helper --ignore --stop -- "${services_vpn_dependent[@]}"
+
+			# nordvpn commands need the nord service running
+			service-helper --enable --start -- 'nordvpnd.socket' 'nordvpnd' || :
+			nordvpn set autoconnect off || :
+			nordvpn set killswitch off || :
+			nordvpn set firewall off || :
+			nordvpn disconnect || :
+		fi
+	}
+	function act_connect {
+		act_disconnect
+
+		# firewall + vpn: reset
+		# https://docs.syncthing.net/users/firewall.html#uncomplicated-firewall-ufw
+		# https://gist.github.com/nmaggioni/45dcca7695d37e6109276b1a6ad8c9c9#file-ufw_plex-md
+		# https://support.plex.tv/articles/201543147-what-network-ports-do-i-need-to-allow-through-my-firewall/
+		if confirm --linger --negative --ppid="$$" -- 'Reset and apply UFW rules?' 'Press [y] on initial setup.'; then
+			# reset firewall (iptables/ip6tables/nftables/netfilter) without being booted from SSH
+			sudo ufw --force disable
+			sudo ufw --force reset
+
+			# add rules
+			sudo ufw allow from 192.168.0.0/16 to any port 22 # local ssh
+			sudo ufw limit ssh                                # limit ssh
+
+			# plex
+			# sudo ufw allow 32400                                     # remote plex
+
+			# samba
+			if service-helper --exists smbd; then
+				sudo ufw allow from 192.168.0.0/16 to any app samba || : # local samba
+			fi
+
+			# syncthing
+			if __command_exists -- syncthing; then
+				sudo ufw allow from 192.168.0.0/16 to any app syncthing || :     # local syncthing peers
+				sudo ufw allow from 192.168.0.0/16 to any app syncthing-gui || : # local syncthing gui
+			fi
+
+			# transmission
+			if __command_exists -- transmission-daemon; then
+				sudo ufw allow from 192.168.0.0/16 to any port 51413 # local transmission peers
+				sudo ufw allow from 192.168.0.0/16 to any port 9091  # local transmission gui
+			fi
+
+			# adguard home remote dns ports
+			if command-exits AdGuardHome; then
+				sudo ufw allow 53  # remote dns
+				sudo ufw allow 853 # remote quic
+				sudo ufw allow 443 # remote https
+				sudo ufw allow 80  # remote http
+				sudo ufw limit 80
+			else
+				sudo ufw allow from 192.168.0.0/16 to any port 53 # local dns
+			fi
+
+			# disable logging
+			sudo ufw logging off
+
+			# reenable
+			sudo ufw --force enable
+			# sudo ufw reload
+
+			# these weren't needed
+			# sudo sysctl net/ipv4/ip_forward=1
+			# sudo sysctl net/ipv6/conf/default/forwarding=1
+			# sudo sysctl net/ipv6/conf/all/forwarding=1
+
+			eval-helper --verbose --wrap -- \
+				sudo ufw status verbose # verbose shows ports + protocols of apps
+			eval-helper --verbose --wrap -- \
+				sudo iptables -L -v
+		fi
+
+		# continue with nordvpn
+		if __command_exists -- nordvpn; then
+			# ensure correctly configured
+			setup-util-nordvpn --quiet || :
+
+			# nordvpn commands need the nord service running
+			service-helper --enable --start -- 'nordvpnd.socket' 'nordvpnd' || :
+
+			# nordvpn reset?
+			if confirm --linger --negative --ppid="$$" -- 'Reset NordVPN settings?' 'Press [y] on initial setup.'; then
+				nordvpn set defaults || :
+			fi
+
+			# nordvpn login
+			if ! nordvpn account; then
+				nordvpn login --token "$NORDVPN_TOKEN"
+				# nordvpn set technology nordlynx
+			fi
+
+			# nordvpn dns
+			if [[ -n $NORDVPN_DNS ]]; then
+				nordvpn set dns "$NORDVPN_DNS"
+			else
+				nordvpn set threatprotectionlite on
+			fi
+
+			# nordvpn firewall
+			# both subnets and ports need to be allowed to enable even local access
+			nordvpn whitelist add subnet 192.168.0.0/16 | echo-regexp -q --regexp='(is already allowlisted|is allowlisted successfully)' # all local
+			# local nordvpn_port nordvpn_ports=(
+			# 	# ssh
+			# 	22
+			# 	# dns
+			# 	53
+			# 	# samba
+			# 	137
+			# 	138
+			# 	139
+			# 	445
+			# 	# syncthing
+			# 	22000
+			# 	21027
+			# 	8384
+			# 	# transmission
+			# 	51413
+			# 	9091
+			# 	# plex
+			# 	32400
+			# 	3005
+			# 	5353
+			# 	8324
+			# )
+			# for nordvpn_port in "${nordvpn_ports[@]}"; do
+			# 	nordvpn whitelist add port "$nordvpn_port"
+			# done
+
+			# verify that killswitch is possible
+			verify_nordvpn_killswitch
+
+			# attempt nordvpn connect
+			nordvpn set autoconnect on P2P
+			nordvpn connect P2P || {
+				__print_style --warning='NordVPN failed to connect, here are the logs:' || return $?
+				service-helper --logs -- nordvpnd
+				nordvpn connect P2P || __return $? -- __print_error 'NordVPN failed to connect, try rebooting manually.' || return $?
+			}
+			waiter 60
+
+			# verify that connection and killswitch work
+			verify_nordvpn_connection
+		fi
+
+		# verify
+		act_status
+	}
+
+	# ---------------------------------
+	# Connection Status
+
+	function act_check {
+		local check_status
+
+		# no nordvpn on this machine, so just check the internet is working
+		if __command_missing -- nordvpn; then
+			is-internet-working
+			return 0
+		fi
+
+		# verify vpn
+		__try {check_status} -- verify_nordvpn_connection
+		if [[ $check_status -eq 2 ]]; then
+			# killswitch failed, we must reboot
+			act_stop
+			__print_style --warning='Failed to activate killswitch. Stopped all services. Ready for reboot:' || return $?
+			__print_style --code='sudo reboot' || return $?
+			return 1
+		elif [[ $check_status -ne 0 ]]; then
+			# failed to connect, try again
+			service-helper --stop --ignore -- "${services_vpn_dependent[@]}"
+			__try {check_status} -- act_connect
+			if [[ $check_status -eq 0 ]]; then
+				__print_style --success='Reconnected to NordVPN.' || return $?
+
+				__print_style --notice='Resuming dependent services:' || return $?
+				# the [|| :] is to that we resume, rather than start, as the service may be dependent on another service such as samba or a mount, this functionality is more just for temporary vpn disconnections/reconnections
+				service-helper --start --ignore -- "${services_vpn_dependent[@]}" || :
+				__print_style --success='Resumed dependent services.' || return $?
+			else
+				__print_style --error='Failed to connect to NordVPN.' || return $?
+				__print_style --notice='As dependent services have already stopped, disabling NordVPN.' || return $?
+				act_disconnect
+				__print_style --warning='You will have to figure out why NordVPN failed.' || return $?
+				return 1
+			fi
+		else
+			__print_style --success='Connection OK.' || return $?
+		fi
+	}
+
+	function act_status {
+		# eval-helper --verbose --wrap \
+		# 	-- sudo ufw status verbose
+		# eval-helper --verbose --wrap \
+		# 	-- sudo iptables -L -v
+		echo-file -- /etc/resolv.conf
+		eval-helper --verbose --wrap -- \
+			resolvectl status --no-pager
+		eval-helper --verbose --wrap -- \
+			resolvectl dns
+		eval-helper --verbose --wrap -- \
+			nslookup cloudflare.com
+		if __command_exists -- nordvpn; then
+			eval-helper --verbose --wrap -- \
+				nordvpn status
+			eval-helper --verbose --wrap -- \
+				fetch 'http://ipecho.net/plain'
+			eval-helper --verbose --wrap -- \
+				fetch 'https://test.nextdns.io'
+			eval-helper --verbose --wrap -- \
+				fetch "https://nordvpn.com/wp-admin/admin-ajax.php?action=get_user_info_data&ip=$(what-is-my-ip remote)"
+		fi
+	}
+
+	# ---------------------------------
+	# Mounting
+
+	function act_mount {
+		# volumes
+		if is-not-directory --user="$SHARE_USER" --group="$SHARE_GROUP" -- '/Volumes'; then
+			__elevate_mkdirp -- '/Volumes'
+			fs-own --user="$SHARE_USER" --group="$SHARE_GROUP" --no-recursive -- '/Volumes'
+		fi
+
+		# drive
+		if [[ ${#DRIVE_MOUNT[@]} -ne 0 ]]; then
+			eval-helper --verbose --wrap --shapeshifter -- \
+				mount-helper "${DRIVE_MOUNT[@]}" "${OWNER_MOUNT[@]}" --mount
+		fi
+
+		# vault
+		if [[ ${#VAULT_MOUNT[@]} -ne 0 ]]; then
+			local vault_share
+			__flag --target={vault_share} --name=share -- "${VAULT_MOUNT[@]}"
+			if [[ -n $vault_share ]] && is-missing --user="$SHARE_USER" --group="$SHARE_GROUP" -- "$vault_share"; then
+				gocryptfs-helper new -- "$vault_share"
+				fs-own --user="$SHARE_USER" --group="$SHARE_GROUP" --recursive -- "$vault_share"
+			fi
+			eval-helper --verbose --wrap --shapeshifter -- \
+				mount-helper "${VAULT_MOUNT[@]}" "${OWNER_MOUNT[@]}" --mount
+		fi
+
+		# samba
+		if [[ ${#SAMBA_MOUNT[@]} -ne 0 ]]; then
+			mount-helper "${SAMBA_MOUNT[@]}" "${OWNER_MOUNT[@]}" --mount
+		fi
+	}
+	function act_unmount {
+		# samba mounts
+		service-helper --ignore --stop --status --logs -- "${services_samba_dependent[@]}"
+		if [[ ${#SAMBA_MOUNT[@]} -ne 0 ]]; then
+			mount-helper "${SAMBA_MOUNT[@]}" "${OWNER_MOUNT[@]}" --unmount --no-automount
+		fi
+
+		# vault
+		service-helper --ignore --stop --status --logs -- "${services_vault_dependent[@]}"
+		if [[ ${#VAULT_MOUNT[@]} -ne 0 ]]; then
+			eval-helper --verbose --wrap --shapeshifter -- \
+				mount-helper "${VAULT_MOUNT[@]}" "${OWNER_MOUNT[@]}" --unmount --no-automount
+		fi
+
+		# drive
+		service-helper --ignore --stop --status --logs -- "${services_drive_dependent[@]}"
+		if [[ ${#DRIVE_MOUNT[@]} -ne 0 ]]; then
+			eval-helper --verbose --wrap --shapeshifter -- \
+				mount-helper "${DRIVE_MOUNT[@]}" "${OWNER_MOUNT[@]}" --unmount --no-automount
+		fi
+	}
+
+	# ---------------------------------
+	# Server
+
+	function act_pause {
+		# pause/stop services
+		service-helper --ignore --stop --status --logs -- "${services_pause[@]}"
+	}
+	function act_resume {
+		# resume/commence/start services
+		service-helper --ignore --start --status --logs -- "${services_resume[@]}"
+	}
+	function act_start {
+		act_stop  # unmounts, disconnects
+		act_check # reconnects
+		act_mount
+		act_permissions
+		if confirm --linger --negative --ppid="$$" -- 'Do you want to reconfigure anything?'; then
+			act_configure
+		fi
+		act_resume
+	}
+	function act_stop {
+		act_unmount
+		act_disconnect
+	}
+	function act_update {
+		act_stop
+		setup-system update
+	}
+	function act_shutdown {
+		act_stop
+		eval-helper --elevate -- shutdown --poweroff
+	}
+	function act_reboot {
+		act_stop
+		eval-helper --elevate -- shutdown --reboot
+	}
+
+	# =====================================
+	# Action
+
+	function help {
+		__print_help "$@" <<-EOF || return $?
+			USAGE:
+			\`setup-server <action>\`
+
+			ACTIONS:
+			setup
+			    Setup the server services.
+
+			start
+			    Start the server services and mount.
+
+			stop
+			    Stop the server services and unmount.
+
+			update
+			    Stop the server services, unmount, and update everything.
+
+			shutdown
+			    Stop the server and power off.
+
+			reboot
+			    Stop the server and reboot.
+
+			config
+			    Output configuration.
+
+			connect
+			    Connect the VPN.
+
+			disconnect
+			    Disconnect the VPN.
+
+			status
+			    Output the status of the internet (and optional VPN) connection.
+
+			check
+			    Check the internet (and optional VPN) connection is working.
+		EOF
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item action='' option_args=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--')
+			option_args+=("$@")
+			shift $#
+			break
+			;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*)
+			if [[ -z $action ]]; then
+				action="$item"
+			else
+				help 'An unrecognised argument was provided: ' --variable-value={item}
+			fi
+			;;
+		esac
+	done
+
+	# assert operating system
+	assert_linux
+
+	# act
+	if [[ -z $action ]]; then
+		help 'No <action> provided.'
+	fi
+	__affirm_function_is_defined "act_$action"
+	"act_$action" "${option_args[@]}" # eval
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_server "$@"
+fi
+
+# -F wipes rules, -X wipes chains
+# bash -c workaround somehow required to avoid being booted from SSH
+# sudo bash -c "ufw --force reset && iptables -F && iptables -X && ip6tables -F && ip6tables -X && ufw allow from 192.168.0.0/16 to any port 22 && ufw --force enable"
+
+# sudo iptables -P INPUT ACCEPT
+# sudo iptables -P FORWARD ACCEPT
+# sudo iptables -P OUTPUT ACCEPT
+# sudo iptables -t nat -F
+# sudo iptables -t mangle -F
+# sudo iptables -F
+# sudo iptables -X
+
+# sudo ip6tables -P INPUT ACCEPT
+# sudo ip6tables -P FORWARD ACCEPT
+# sudo ip6tables -P OUTPUT ACCEPT
+# sudo ip6tables -t nat -F
+# sudo ip6tables -t mangle -F
+# sudo ip6tables -F
+# sudo ip6tables -X
+
+# `sudo ufw --force disable && sudo ufs --force reset` does all the above, and also handles nftables/netfilter (which is the successor of iptables and ip6tables)

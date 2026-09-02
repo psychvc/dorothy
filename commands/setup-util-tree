@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+# https://repology.org/project/tree/versions <-- missing
+
+function setup_util_tree() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='tree'
+		"$@"
+		APK='tree' # ALPINE
+		APT='tree' # UBUNTU
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_tree "$@"
+fi
